@@ -138,7 +138,7 @@ bool do_exec_redirect(const char *outputfile, int count, ...)
     int fd = -1;
     pid_t pid;
 
-    fd = open("do_exec_redirect_log.txt", (O_WRONLY | O_TRUNC | O_CREAT), 0644);    
+    fd = open(outputfile, (O_WRONLY | O_TRUNC | O_CREAT), 0644);    
 
     /* Output errors to stdout if log file creation failed */
     if (fd < 0) {
