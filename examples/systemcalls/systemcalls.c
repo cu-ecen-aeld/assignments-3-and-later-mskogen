@@ -30,9 +30,7 @@ bool do_system(const char *cmd)
      * value.
      */
     if (WIFEXITED(wait_val)) {
-        if (WEXITSTATUS(wait_val) == 0) {
-            return true;
-        }
+        return (WEXITSTATUS(wait_val) == EXIT_SUCCESS);
     }
 
     /* If process didn't exit properly, return false */
@@ -84,7 +82,7 @@ bool do_exec(int count, ...)
         return false;
     } else if (pid == 0) {
         /* Inside child process */
-        ret_val = execv(command[0], &command[1]);
+        ret_val = execv(command[0], command);
         
         /* If process failed to execute return false for error */
         if (ret_val == -1) {
@@ -105,9 +103,7 @@ bool do_exec(int count, ...)
      * value.
      */
     if (WIFEXITED(wait_val)) {
-        if (WEXITSTATUS(wait_val) == 0) {
-            return true;
-        }
+        return (WEXITSTATUS(wait_val) == EXIT_SUCCESS);
     }
 
     return false;
@@ -160,7 +156,7 @@ bool do_exec_redirect(const char *outputfile, int count, ...)
             break;
         case 0:
             /* Inside child process */
-            ret_val = execv(command[0], &command[1]);
+            ret_val = execv(command[0], command);
             
             /* If process failed to execute return false for error */
             if (ret_val == -1) {
@@ -186,10 +182,8 @@ bool do_exec_redirect(const char *outputfile, int count, ...)
     * make sure that the command exited properly and did not return a non-zero 
     * value.
     */
-    if (WIFEXITED(wait_val)) {
-        if (WEXITSTATUS(wait_val) == 0) {
-            return true;
-        }
+    if (WIFEXITED(wait_val) && (errors == 0)) {
+        return (WEXITSTATUS(wait_val) == EXIT_SUCCESS);
     }
 
     return false;
