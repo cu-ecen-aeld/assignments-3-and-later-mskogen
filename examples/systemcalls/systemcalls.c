@@ -1,3 +1,9 @@
+#include <stdlib.h>
+#include <unistd.h>
+#include <sys/wait.h>
+#include <sys/types.h>
+#include <fcntl.h>
+
 #include "systemcalls.h"
 
 /**
@@ -13,10 +19,10 @@ bool do_system(const char *cmd)
     wait_val = system(cmd);
 
     /* Return an error if the system call failed. */
-    if ((wait_val == 0){
+    if (wait_val == 0){
         printf("Error shell unavailable\n");
         return false;
-    } else if (wait_val == -1)) {
+    } else if (wait_val == -1) {
         perror("system() failed: ");
         return false;
     }
@@ -158,18 +164,15 @@ bool do_exec_redirect(const char *outputfile, int count, ...)
             /* If process failed to execute return false for error */
             if (ret_val == -1) {
                 perror("execv() failed: ");
-                errors++;
                 exit(EXIT_FAILURE);
             }
             break;
         default:
-            /* Parent process, finish processing out of switch block */
-    }
-
-    /* Parent does cleanup of process, waits for child process to exit */
-    if (wait(&wait_val) == -1) {
-        perror("wait() failed: ");
-        errors++;
+            /* Parent does cleanup of process, waits for child process to exit */
+            if (wait(&wait_val) == -1) {
+                perror("wait() failed: ");
+                errors++;
+            }
     }
 
     /* Done with log now, close file */
