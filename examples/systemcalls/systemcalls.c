@@ -19,10 +19,7 @@ bool do_system(const char *cmd)
     wait_val = system(cmd);
 
     /* Return an error if the system call failed. */
-    if (wait_val == 0){
-        printf("Error shell unavailable\n");
-        return false;
-    } else if (wait_val == -1) {
+    if (wait_val == -1) {
         perror("system() failed: ");
         return false;
     }
@@ -33,10 +30,12 @@ bool do_system(const char *cmd)
      * value.
      */
     if (WIFEXITED(wait_val)) {
-        return (WEXITSTATUS(wait_val) == EXIT_SUCCESS);
+        if (WEXITSTATUS(wait_val) == 0) {
+            return true;
+        }
     }
 
-    /* If process didn't exit properly, return false*/
+    /* If process didn't exit properly, return false */
     return false;
 }
 
@@ -90,8 +89,8 @@ bool do_exec(int count, ...)
         /* If process failed to execute return false for error */
         if (ret_val == -1) {
             perror("execv() failed: ");
-            exit(EXIT_FAILURE);
         }
+        exit(EXIT_FAILURE);
     }
 
     /* Parent does cleanup of process, waits for child process to exit */
@@ -106,7 +105,9 @@ bool do_exec(int count, ...)
      * value.
      */
     if (WIFEXITED(wait_val)) {
-        return (WEXITSTATUS(wait_val) == EXIT_SUCCESS);
+        if (WEXITSTATUS(wait_val) == 0) {
+            return true;
+        }
     }
 
     return false;
@@ -185,8 +186,10 @@ bool do_exec_redirect(const char *outputfile, int count, ...)
     * make sure that the command exited properly and did not return a non-zero 
     * value.
     */
-    if (WIFEXITED(wait_val) && (errors == 0)) {
-        return (WEXITSTATUS(wait_val) == EXIT_SUCCESS);
+    if (WIFEXITED(wait_val)) {
+        if (WEXITSTATUS(wait_val) == 0) {
+            return true;
+        }
     }
 
     return false;
