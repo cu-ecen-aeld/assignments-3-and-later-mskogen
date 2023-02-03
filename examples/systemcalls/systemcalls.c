@@ -136,7 +136,7 @@ bool do_exec_redirect(const char *outputfile, int count, ...)
     int ret_val = 0;
     int errors = 0;
     int fd = -1;
-    // int c_fd = -1;
+    int c_fd = -1;
     pid_t pid;
 
     /* Creates log file with 0644 permissions. */
@@ -159,11 +159,11 @@ bool do_exec_redirect(const char *outputfile, int count, ...)
             break;
         case 0:
             /* Inside child process */
-            // /* Redirect any output to same logfile as parent process */
-            // if (dup2(fd, c_fd) == -1) {
-            //     perror("dup2() failed: ");
-            //     exit(EXIT_FAILURE);
-            // }
+            /* Redirect any output to same logfile as parent process */
+            if (dup2(fd, c_fd) == -1) {
+                perror("dup2() failed: ");
+                exit(EXIT_FAILURE);
+            }
             if (fd >= 0) {
                 close(fd);
             }
