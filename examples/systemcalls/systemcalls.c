@@ -136,9 +136,12 @@ bool do_exec_redirect(const char *outputfile, int count, ...)
     int ret_val = 0;
     int errors = 0;
     int fd = -1;
+    // int c_fd = -1;
     pid_t pid;
 
-    fd = open(outputfile, (O_WRONLY | O_TRUNC | O_CREAT), 0644);    
+    /* Creates log file with 0644 permissions. */
+    fd = open(outputfile, (O_WRONLY | O_TRUNC | O_CREAT), \
+        (S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH));    
 
     /* Output errors to stdout if log file creation failed */
     if (fd < 0) {
@@ -156,6 +159,14 @@ bool do_exec_redirect(const char *outputfile, int count, ...)
             break;
         case 0:
             /* Inside child process */
+            // /* Redirect any output to same logfile as parent process */
+            // if (dup2(fd, c_fd) == -1) {
+            //     perror("dup2() failed: ");
+            //     exit(EXIT_FAILURE);
+            // }
+            if (fd >= 0) {
+                close(fd);
+            }
             ret_val = execv(command[0], command);
             
             /* If process failed to execute return false for error */
