@@ -136,7 +136,6 @@ bool do_exec_redirect(const char *outputfile, int count, ...)
     int ret_val = 0;
     int errors = 0;
     int fd = -1;
-    int c_fd = -1;
     pid_t pid;
 
     /* Creates log file with 0644 permissions. */
@@ -160,13 +159,11 @@ bool do_exec_redirect(const char *outputfile, int count, ...)
         case 0:
             /* Inside child process */
             /* Redirect any output to same logfile as parent process */
-            if (dup2(fd, c_fd) == -1) {
+            if (dup2(fd, 1) < 0) {
                 perror("dup2() failed: ");
                 exit(EXIT_FAILURE);
             }
-            if (fd >= 0) {
-                close(fd);
-            }
+            close(fd);
             ret_val = execv(command[0], command);
             
             /* If process failed to execute return false for error */
@@ -184,9 +181,7 @@ bool do_exec_redirect(const char *outputfile, int count, ...)
     }
 
     /* Done with log now, close file */
-    if (fd >= 0) {
-        close(fd);
-    }
+    close(fd);
 
     /* 
     * If we made it here the return val is a valid wait status. Check it to 
