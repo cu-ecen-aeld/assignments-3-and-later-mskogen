@@ -5,6 +5,10 @@
 set -e
 set -u
 
+# Change directory to current location of this script to ensure files are all
+# referenced in the correct location.
+cd /etc/finder-app/
+
 NUMFILES=10
 WRITESTR=AELD_IS_FUN
 WRITEDIR=/tmp/aeld-data
@@ -51,10 +55,12 @@ fi
 
 for i in $( seq 1 $NUMFILES)
 do
-	./writer "$WRITEDIR/${username}$i.txt" "$WRITESTR"
+	writer "$WRITEDIR/${username}$i.txt" "$WRITESTR"
 done
 
-OUTPUTSTRING=$(./finder.sh "$WRITEDIR" "$WRITESTR")
+OUTPUTSTRING=$(finder.sh "$WRITEDIR" "$WRITESTR")
+
+writer "/tmp/assignment4-result.txt" "$OUTPUTSTRING"
 
 # remove temporary directories
 rm -rf /tmp/aeld-data
