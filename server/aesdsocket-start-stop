@@ -6,7 +6,7 @@ process_name=aesdsocket
 case "$1" in
     start)
         echo "Starting $process_name"
-        start-stop-daemon -S -n $process_name -a /usr/bin/aesdsocket -d
+        start-stop-daemon -S -n $process_name -a /usr/bin/aesdsocket -- -d
         ;;
     stop)
         echo "Stopping $process_name"
