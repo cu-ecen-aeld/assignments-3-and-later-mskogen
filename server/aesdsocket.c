@@ -32,6 +32,7 @@
 #include <arpa/inet.h>
 #include <errno.h>
 #include <signal.h>
+#include <syslog.h>
 
 
 #define DEFAULT_PROTOCOL    (0)
@@ -44,21 +45,18 @@
 #define WRITE_SIZE          (1024)
 
 int exit_status = 0;
-int server_fd = 0;
+int socket_fd = 0;
 
 // Handles both SIGINT and SIGTERM signals
 static void signal_handler(int signum)
 {
-    if (signum == SIGINT) {
-        printf("Caught SIGINT, cleaning up...\n");
-    } else if (signum == SIGTERM) {
-        printf("Caught SIGTERM, cleaning up...\n");
-    } else {
-        // Unknown signal
-        printf("Error: unknown signal\n");
+    if ((signum == SIGINT) || (signum == SIGTERM)) {
+        syslog(LOG_INFO, "Caught signal, exiting\n");
+    } else { // Unknown signal
+        syslog(LOG_ERR, "Error: Caught unknown signal\n");
         return;
     }
-    close(server_fd);
+    close(socket_fd);
     exit_status = 1;
     return;
 }
@@ -75,15 +73,17 @@ void *get_in_addr(struct sockaddr *sa)
 
 int main(int argc, char *argv[])
 {
+    openlog("aesdsocket", LOG_CONS, LOG_USER);
+
     if (signal(SIGINT, signal_handler) == SIG_ERR) {
-        // Cannot register SIGINT, error
-        printf("Error: Cannot register SIGINT\n");
+        syslog(LOG_ERR, "Error: Cannot register SIGINT\n");
+        closelog();
         return SERVER_FAILURE;
     }
 
     if (signal(SIGTERM, signal_handler) == SIG_ERR) {
-        // Cannot register SIGTERM, error
-        printf("Error: Cannot register SIGTERM\n");
+        syslog(LOG_ERR, "Error: Cannot register SIGTERM\n");
+        closelog();
         return SERVER_FAILURE;
     }
 
@@ -105,35 +105,32 @@ int main(int argc, char *argv[])
     status = getaddrinfo(NULL, SERVER_PORT, &hints, &socket_addrinfo);
 
     if (status != 0) {
-        // ERROR LOG HERE ("getaddrinfo: %s\n", gai_strerror(status))
-        printf("Error getaddrinfo(): %s\n", gai_strerror(status));
+        syslog(LOG_ERR, "Error getaddrinfo(): %s\n", gai_strerror(status));
+        closelog();
         return SERVER_FAILURE;
     }
     
+    // Open a stream socket SOCK_STREAM bound to port 9000, return -1 if 
+    // connection steps fail
     for (p_ai = socket_addrinfo ; p_ai != NULL; p_ai = p_ai->ai_next) {
-        // Open a stream socket SOCK_STREAM bound to port 9000, return -1 if 
-        // connection steps fail
-        server_fd = socket(p_ai->ai_family, p_ai->ai_socktype, p_ai->ai_protocol);
 
-        if (server_fd == -1) {
-            // ERROR LOG HERE "Failed to create socker" errno set
-            printf("Error socket(): %s\n", strerror(errno));
+        socket_fd = socket(p_ai->ai_family, p_ai->ai_socktype, p_ai->ai_protocol);
+
+        if (socket_fd == -1) {
+            syslog(LOG_ERR, "Error socket(): %s\n", strerror(errno));
             errors++;
         } else {
-            status = setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR,
+            status = setsockopt(socket_fd, SOL_SOCKET, SO_REUSEADDR,
                                 &sockopt_yes, sizeof(sockopt_yes));
 
             if (status == -1) {
-                // ERROR LOG HERE "Failed to setsockopt" errno set
-                printf("Error setsockopt(): %s\n", strerror(errno));
+                syslog(LOG_ERR, "Error setsockopt(): %s\n", strerror(errno));
                 errors++;
             } else {
-                status = bind(server_fd, p_ai->ai_addr, p_ai->ai_addrlen);
+                status = bind(socket_fd, p_ai->ai_addr, p_ai->ai_addrlen);
                 
                 if (status == -1) {
-                    // ERROR LOG HERE ("bind(): %s\n" errno set
-                    close(server_fd);
-                    printf("Error bind(): %s\n", strerror(errno));
+                    syslog(LOG_ERR, "Error bind(): %s\n", strerror(errno));
                     errors++;
                 }
                 break;
@@ -141,15 +138,16 @@ int main(int argc, char *argv[])
         }
     }
 
+    // Free memory allocated in getaddrinfo() call
     if (socket_addrinfo != NULL) {
         freeaddrinfo(socket_addrinfo);
+        socket_addrinfo = NULL;
     }
 
     if (errors > 0) {
-        if (server_fd != -1) {
-            close(server_fd);
-        }
-        printf("Errors during socket setup\n");
+        close(socket_fd);
+        syslog(LOG_ERR, "Errors during socket setup\n");
+        closelog();
         return SERVER_FAILURE;
     }
 
@@ -160,25 +158,32 @@ int main(int argc, char *argv[])
     // Listen for and accept a connection, restarts when connection closed
     // listens forever unless SIGINT or SIGTERM received, if signal received,
     // gracefully exit.
-    status = listen(server_fd, BACKLOG);
+    status = listen(socket_fd, BACKLOG);
 
     if (status == -1) {
-        // ERROR LOG HERE "Failed to listen" errno set
-        printf("Error listen(): %s\n", strerror(errno));
+        close(socket_fd);
+        syslog(LOG_ERR, "Error listen(): %s\n", strerror(errno));
+        closelog();
         return SERVER_FAILURE;
     }
 
-    printf("Waiting for a client to connect...\n");
+    syslog(LOG_DEBUG, "Waiting for a client to connect...\n");
+
+    // Loop back to Listen for accept connection
     while (exit_status == 0)
     {
         client_addrlen = sizeof(client_addr);
-        client_fd = accept(server_fd, 
+        client_fd = accept(socket_fd, 
                             (struct sockaddr*)&client_addr, 
                             &client_addrlen);
 
         if (client_fd == -1) {
-            // ERROR LOG HERE "Failed to accept" errno set
-            printf("Error accept(): %s\n", strerror(errno));
+            // Ignore bad file descriptor error when shutdown starts
+            if (errno != EBADF) {
+                close(socket_fd);
+                syslog(LOG_ERR, "Error accept(): %s\n", strerror(errno));
+            }
+            exit_status = 1;
             continue;
         }
 
@@ -188,14 +193,18 @@ int main(int argc, char *argv[])
                     get_in_addr((struct sockaddr*)&client_addr), 
                     client_ip, 
                     sizeof(client_ip));
-        printf("Accepted connection from %s\n", client_ip);
+        syslog(LOG_INFO, "Accepted connection from %s\n", client_ip);
 
         int rx_size = READ_SIZE;
         int rx_bytes = 0;
         char* rx_buffer = malloc(rx_size);
 
         if (rx_buffer == NULL) {
-            printf("Error failed to malloc()\n");
+            syslog(LOG_ERR, "Error failed to malloc()\n");
+            close(socket_fd);
+            close(client_fd);
+            exit_status = 1;
+            continue;
         }
 
         // Zero memory before reading
@@ -208,9 +217,15 @@ int main(int argc, char *argv[])
         FILE* data_file = fopen(TMP_FILE, "a+");
 
         if (data_file == NULL) {
-            printf("Error fopen(): %s\n", strerror(errno));
-        } else {
-            printf("Successfully opened file %s\n", TMP_FILE);
+            syslog(LOG_ERR, "Error fopen(): %s\n", strerror(errno));
+            close(socket_fd);
+            close(client_fd);
+            if (rx_buffer != NULL) {
+                free(rx_buffer);
+                rx_buffer = NULL;
+            }
+            exit_status = 1;
+            continue;
         }
 
         while (1) {
@@ -223,46 +238,39 @@ int main(int argc, char *argv[])
                 bytes_to_read = READ_SIZE;
                 rx_buffer = realloc(rx_buffer, rx_size);
                 if (rx_buffer == NULL) {
-                    printf("Error failed to realloc()\n");
-                    if (fclose(data_file) != 0) {
-                        printf("Error fclose(): %s\n", strerror(errno));
-                    }
+                    syslog(LOG_ERR, "Error failed to realloc()\n");
+                    fclose(data_file);
+                    close(socket_fd);
+                    close(client_fd);
                     break; // send to cleanup
                 }
                 memset(&(rx_buffer[total_bytes]), 0, READ_SIZE);
             }
 
-
             rx_bytes = recv(client_fd, &(rx_buffer[total_bytes]), rx_size - total_bytes, 0);
-            printf("Read %i bytes\n", rx_bytes);
 
             if (rx_bytes == 0) {
-                printf("Done reading!\n");
-                if (fclose(data_file) != 0) {
-                    printf("Error fclose(): %s\n", strerror(errno));
-                }
                 break; // done sending
             }
 
             total_bytes += rx_bytes;
-            printf("total_bytes now %i bytes\n", total_bytes);
 
             // check buffer for '\n' newline character
             // If it exists, append to file and send back on client 
             // check for all '\n' characters, after transmitting
             // move all data down to zero index of malloc'd packet
-            // USE strchr() to fine \n characters: https://man7.org/linux/man-pages/man3/strchr.3.html
+            // USE strchr() to fine \n characters: 
+            // https://man7.org/linux/man-pages/man3/strchr.3.html
             if (total_bytes < rx_size) {
                 while (1) {
-                    printf("checking for newline\n");
+                    // Check for newline
                     p_end = strchr(rx_buffer, '\n');
 
                     if (p_end == NULL) {
-                        break;
+                        break; // no newline found
                     }
 
-                    printf("Found a newline! saving to file\n");
-
+                    // Write packet to file
                     char* p = rx_buffer;
                     int packet_len = p_end - p;
                     while (p <= p_end) {
@@ -271,37 +279,32 @@ int main(int argc, char *argv[])
                         total_bytes--;
                     }
 
-                    printf("packet saved, new total_bytes is %i\n", total_bytes);
-
                     // Remove saved packet and shift data down to start of buffer.
                     memset(rx_buffer, 0, packet_len);
                     memcpy(rx_buffer, p, total_bytes);
 
-                    // Send data back on client
+                    // Send packet back on client
                     char line[WRITE_SIZE];
                     memset(line, 0, WRITE_SIZE);
                     int tx_bytes = 0;
                     int tx_bytes_to_send = 0;
 
-                    printf("Trying to send packet now...\n");
+                    // Reset file pointer to read from beginning of file
                     rewind(data_file);
 
                     while (fgets(line, WRITE_SIZE, data_file) != NULL) {
-
-                        printf("Found a line, sending '%s' now\n", line);
-
                         tx_bytes_to_send = strlen(line);
-
-                        tx_bytes = send(client_fd, line, tx_bytes_to_send, MSG_NOSIGNAL);
+                        tx_bytes = send(client_fd, line, tx_bytes_to_send, 0);
                         if (tx_bytes == -1) {
-                            printf("Error send(): %s\n", strerror(errno));
+                            syslog(LOG_ERR, "Error send(): %s\n", strerror(errno));
                             break;
                         } else if (tx_bytes_to_send != tx_bytes) {
-                            printf("Error only sent %i bytes but should have been %i "
-                                "bytes\n", tx_bytes, tx_bytes_to_send);
-                            
+                            syslog(LOG_ERR, "Error only sent %i bytes but"
+                                "should have been %i bytes\n", 
+                                tx_bytes, tx_bytes_to_send);
+                            break;
                         } else {
-                            printf("Success: sent %i bytes\n", tx_bytes);
+                            syslog(LOG_DEBUG, "Success: sent %i bytes\n", tx_bytes);
                         }
                         memset(line, 0, sizeof(line));
                     }
@@ -309,48 +312,33 @@ int main(int argc, char *argv[])
             }
         }
 
+        if (fclose(data_file) != 0) {
+            syslog(LOG_ERR, "Error fclose(): %s\n", strerror(errno));
+        }
+
         if (rx_buffer != NULL) {
             free(rx_buffer);
+            rx_buffer = NULL;
         }
 
-        printf("Finished sending to client\n");
         if (close(client_fd) == -1) {
-            printf("Error close(client_fd): %s\n", strerror(errno));
+            syslog(LOG_ERR, "Error close(client_fd): %s\n", strerror(errno));
         }
-        printf("Closed connection from %s\n", client_ip);
+
+        // Log message to syslog "Closed connection from <CLIENT_IP_ADDRESS>"
+        syslog(LOG_INFO, "Closed connection from %s\n", client_ip);
     }
-    // Receive data over the connection and append to file 
-    // /var/tmp/aesdsocketdata, Create file if doesn't exist
-    // Separate data packets by "/n", each newline appends to /var/tmp/aesdsocketdata
-    // Assume no null characters, can use string handling functions
-    // use malloc, assume packet will be shorter than available heap size so you
-    // can fail program if malloc fails and can discard over-length packets
 
-
-    // At end of of transmission send /var/tmp/aesdsocketdata back to client
-    // Don't assume total size of all packets sent will be less than available RAM
-    // for process heap, meaning you need to read line by line to send data back
-
-    // Log message to syslog "Closed connection from <CLIENT_IP_ADDRESS>"
-
-    // Loop back to Listen for accept connection
-
-    // Cleanup from SIGINT/SIGTERM 
-    // Gracefully exit,
-    
-    // Log message to syslog "Caught signal, exiting" for SIGINT/SIGTERM received
-
-    // Completes any open connection operations
-    
-    // close sockets
-    // close file descritors for socket() and accept() and /var/tmp/aesdsocketdata
-    // if (close(server_fd) == -1) {
-    //     printf("Error close(server_fd): %s\n", strerror(errno));
-    // }
-    // delete /var/tmp/aesdsocketdata
+    // Cleanup any open file decriptors or files
+    if (close(client_fd) == -1) {
+        syslog(LOG_DEBUG, "Error close(client_fd): %s\n", strerror(errno));
+    }
     if (remove(TMP_FILE) == -1) {
-        printf("Error remove(%s): %s\n", TMP_FILE, strerror(errno));
+        syslog(LOG_DEBUG, "Error remove(%s): %s\n", TMP_FILE, strerror(errno));
     }
+
+    // Close syslog file
+    closelog();
 
     return SERVER_SUCCESS;
 }
