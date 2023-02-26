@@ -1,7 +1,7 @@
 PROGRAM_NAME = aesdsocket
-SRC_FILES = src/main.c src/server.c
+SRC_FILES = aesdsocket.c
 CC = gcc
-CFLAGS = -Werror -Wall
+CFLAGS = -g -Werror -Wall
 
 all:
 	$(CROSS_COMPILE)$(CC) $(CFLAGS) -I. ${SRC_FILES} -o $(PROGRAM_NAME)

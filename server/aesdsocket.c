@@ -9,7 +9,7 @@
 ​*
 *****************************************************************************/
 /**
-​*​ ​@file​ server.c
+​*​ ​@file​ aesdsocket.c
 ​*​ ​@brief​ Server module for basic socket communication
 ​*
 ​*​ ​@author​s ​Matthew Skogen
@@ -33,7 +33,6 @@
 #include <errno.h>
 #include <signal.h>
 
-#include "server.h"
 
 #define DEFAULT_PROTOCOL    (0)
 #define SERVER_SUCCESS      (0)
@@ -42,6 +41,9 @@
 #define TMP_FILE            ("/var/tmp/aesdsocketdata")
 #define READ_SIZE           (1024)
 #define WRITE_SIZE          (1024)
+
+int exit_status = 0;
+int server_fd = 0;
 
 // Handles both SIGINT and SIGTERM signals
 static void signal_handler(int signum)
@@ -55,13 +57,13 @@ static void signal_handler(int signum)
         printf("Error: unknown signal\n");
         return;
     }
+    close(server_fd);
     exit_status = 1;
     return;
 }
 
-int test_server()
+int main(int argc, char *argv[])
 {
-
     if (signal(SIGINT, signal_handler) == SIG_ERR) {
         // Cannot register SIGINT, error
         printf("Error: Cannot register SIGINT\n");
@@ -76,7 +78,7 @@ int test_server()
 
     int status = 0, errors = 0;
 
-    int server_fd, client_fd;
+    int client_fd;
     int sockopt_yes = 1;
     struct sockaddr client_addr;
     socklen_t client_addrlen = sizeof(client_addr);
@@ -159,14 +161,14 @@ int test_server()
     }
 
     printf("Waiting for a client to connect...\n");
-    while (!exit_status)
+    while (exit_status == 0)
     {
         client_fd = accept(server_fd, &client_addr, &client_addrlen);
 
         if (client_fd == -1) {
             // ERROR LOG HERE "Failed to accept" errno set
             printf("Error accept(): %s\n", strerror(errno));
-            return SERVER_FAILURE;
+            continue;
         }
 
         // Log message to syslog "Accepted connection from <CLIENT_IP_ADDRESS>"
@@ -336,9 +338,9 @@ int test_server()
     
     // close sockets
     // close file descritors for socket() and accept() and /var/tmp/aesdsocketdata
-    if (close(server_fd) == -1) {
-        printf("Error close(server_fd): %s\n", strerror(errno));
-    }
+    // if (close(server_fd) == -1) {
+    //     printf("Error close(server_fd): %s\n", strerror(errno));
+    // }
     // delete /var/tmp/aesdsocketdata
     if (remove(TMP_FILE) == -1) {
         printf("Error remove(%s): %s\n", TMP_FILE, strerror(errno));
