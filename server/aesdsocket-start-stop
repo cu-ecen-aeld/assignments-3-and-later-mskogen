@@ -1,0 +1,20 @@
+#! /bin/sh
+
+# Start/stop the aesdsock program as a daemon
+process_name=aesdsocket
+
+case "$1" in
+    start)
+        echo "Starting $process_name"
+        start-stop-daemon -S -n $process_name -a /usr/bin/aesdsocket -d
+        ;;
+    stop)
+        echo "Stopping $process_name"
+        start-stop-daemon -K -n $process_name
+        ;;
+    *)
+        echo "Usage: $0 {start|stop}"
+    exit 1
+esac
+
+exit 0
