@@ -35,6 +35,7 @@
 
 
 #define DEFAULT_PROTOCOL    (0)
+#define BACKLOG             (10)
 #define SERVER_SUCCESS      (0)
 #define SERVER_FAILURE      (-1)
 #define SERVER_PORT         ("9000")
@@ -62,6 +63,16 @@ static void signal_handler(int signum)
     return;
 }
 
+// Beej Guide helper function for fetching proper sockaddr
+void *get_in_addr(struct sockaddr *sa)
+{
+    if (sa->sa_family == AF_INET) {
+        return &(((struct sockaddr_in*)sa)->sin_addr);
+    }
+
+    return &(((struct sockaddr_in6*)sa)->sin6_addr);
+}
+
 int main(int argc, char *argv[])
 {
     if (signal(SIGINT, signal_handler) == SIG_ERR) {
@@ -80,21 +91,18 @@ int main(int argc, char *argv[])
 
     int client_fd;
     int sockopt_yes = 1;
-    struct sockaddr client_addr;
-    socklen_t client_addrlen = sizeof(client_addr);
+    struct sockaddr_storage client_addr;
+    socklen_t client_addrlen;
     
     struct addrinfo *socket_addrinfo, *p_ai;
     struct addrinfo hints;
     memset(&hints, 0, sizeof(hints));
-    hints.ai_family = AF_INET;
+    hints.ai_family = AF_UNSPEC;
     hints.ai_socktype = SOCK_STREAM;
     hints.ai_flags = AI_PASSIVE;
     hints.ai_protocol = DEFAULT_PROTOCOL;
 
-
-    const char* socket_port = SERVER_PORT;
-
-    status = getaddrinfo(NULL, socket_port, &hints, &socket_addrinfo);
+    status = getaddrinfo(NULL, SERVER_PORT, &hints, &socket_addrinfo);
 
     if (status != 0) {
         // ERROR LOG HERE ("getaddrinfo: %s\n", gai_strerror(status))
@@ -147,12 +155,12 @@ int main(int argc, char *argv[])
 
     // DAEMON argument fork() here
 
-    char client_ip[INET_ADDRSTRLEN];
+    char client_ip[INET6_ADDRSTRLEN];
 
     // Listen for and accept a connection, restarts when connection closed
     // listens forever unless SIGINT or SIGTERM received, if signal received,
     // gracefully exit.
-    status = listen(server_fd, SOMAXCONN);
+    status = listen(server_fd, BACKLOG);
 
     if (status == -1) {
         // ERROR LOG HERE "Failed to listen" errno set
@@ -163,7 +171,10 @@ int main(int argc, char *argv[])
     printf("Waiting for a client to connect...\n");
     while (exit_status == 0)
     {
-        client_fd = accept(server_fd, &client_addr, &client_addrlen);
+        client_addrlen = sizeof(client_addr);
+        client_fd = accept(server_fd, 
+                            (struct sockaddr*)&client_addr, 
+                            &client_addrlen);
 
         if (client_fd == -1) {
             // ERROR LOG HERE "Failed to accept" errno set
@@ -173,7 +184,10 @@ int main(int argc, char *argv[])
 
         // Log message to syslog "Accepted connection from <CLIENT_IP_ADDRESS>"
         memset(client_ip, 0, sizeof(client_ip));
-        inet_ntop(AF_INET, &client_addr, client_ip, sizeof(client_ip));
+        inet_ntop(client_addr.ss_family, 
+                    get_in_addr((struct sockaddr*)&client_addr), 
+                    client_ip, 
+                    sizeof(client_ip));
         printf("Accepted connection from %s\n", client_ip);
 
         int rx_size = READ_SIZE;
@@ -191,7 +205,7 @@ int main(int argc, char *argv[])
         char* p_end = NULL;
 
         // Create file to write packets to
-        FILE* data_file = fopen(TMP_FILE, "a");
+        FILE* data_file = fopen(TMP_FILE, "a+");
 
         if (data_file == NULL) {
             printf("Error fopen(): %s\n", strerror(errno));
@@ -219,7 +233,7 @@ int main(int argc, char *argv[])
             }
 
 
-            rx_bytes = recv(client_fd, &(rx_buffer[total_bytes]), rx_size - total_bytes, MSG_WAITALL);
+            rx_bytes = recv(client_fd, &(rx_buffer[total_bytes]), rx_size - total_bytes, 0);
             printf("Read %i bytes\n", rx_bytes);
 
             if (rx_bytes == 0) {
@@ -262,49 +276,41 @@ int main(int argc, char *argv[])
                     // Remove saved packet and shift data down to start of buffer.
                     memset(rx_buffer, 0, packet_len);
                     memcpy(rx_buffer, p, total_bytes);
+
+                    // Send data back on client
+                    char line[WRITE_SIZE];
+                    memset(line, 0, WRITE_SIZE);
+                    int tx_bytes = 0;
+                    int tx_bytes_to_send = 0;
+
+                    printf("Trying to send packet now...\n");
+                    rewind(data_file);
+
+                    while (fgets(line, WRITE_SIZE, data_file) != NULL) {
+
+                        printf("Found a line, sending '%s' now\n", line);
+
+                        tx_bytes_to_send = strlen(line);
+
+                        tx_bytes = send(client_fd, line, tx_bytes_to_send, MSG_NOSIGNAL);
+                        if (tx_bytes == -1) {
+                            printf("Error send(): %s\n", strerror(errno));
+                            break;
+                        } else if (tx_bytes_to_send != tx_bytes) {
+                            printf("Error only sent %i bytes but should have been %i "
+                                "bytes\n", tx_bytes, tx_bytes_to_send);
+                            
+                        } else {
+                            printf("Success: sent %i bytes\n", tx_bytes);
+                        }
+                        memset(line, 0, sizeof(line));
+                    }
                 }
             }
         }
-        
+
         if (rx_buffer != NULL) {
             free(rx_buffer);
-        }
-
-        // Open file to send back
-        data_file = fopen(TMP_FILE, "r");
-
-        if (data_file == NULL) {
-            printf("Error fopen(): %s\n", strerror(errno));
-        } else {
-            printf("Opened %s to send back!\n", TMP_FILE);
-            // char* line = malloc(WRITE_SIZE);
-            char line[WRITE_SIZE];
-
-            // if (line == NULL) {
-            //     printf("Error failed to malloc line\n");
-            // } else {
-            memset(line, 0, WRITE_SIZE);
-            int tx_bytes = 0;
-
-            while (fgets(line, (WRITE_SIZE - 1), data_file) != NULL) {
-                
-                printf("Found a line, sending %s now\n", line);
-
-                tx_bytes = send(client_fd, line, strlen(line), 0);
-                if (tx_bytes == -1) {
-                    printf("Error send(): %s\n", strerror(errno));
-                    break;
-                } else {
-                    printf("Sent a %i byte packet\n", tx_bytes);
-                    memset(line, 0, sizeof(line));
-                }
-            }
-            //     free(line);
-            // }
-
-            if (fclose(data_file) != 0) {
-                printf("Error fclose(): %s\n", strerror(errno));
-            }
         }
 
         printf("Finished sending to client\n");
