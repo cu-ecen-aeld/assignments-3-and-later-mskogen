@@ -73,6 +73,21 @@ void *get_in_addr(struct sockaddr *sa)
 
 int main(int argc, char *argv[])
 {
+    int daemon;
+
+    // Verify proper usage of program
+    if ((argc == 2) && (strcmp(argv[1],"-d") == 0)) {
+        // daemon mode specified
+        daemon = 1;
+    } else if (argc == 1) {
+        // foreground application
+        daemon = 0;
+    } else {
+        printf("ERROR: Invalid arguments %i\n", argc);
+        printf("Usage: ./aesdsocket [-d]\n");
+        return SERVER_FAILURE;
+    }
+
     openlog("aesdsocket", LOG_CONS, LOG_USER);
 
     if (signal(SIGINT, signal_handler) == SIG_ERR) {
@@ -152,7 +167,27 @@ int main(int argc, char *argv[])
     }
 
     // DAEMON argument fork() here
-
+    if (daemon) {
+        pid_t pid = fork();
+        switch (pid) {
+        case -1:
+            // Failed to create child process
+            close(socket_fd);
+            syslog(LOG_ERR, "Error fork()\n");
+            closelog();
+            return SERVER_FAILURE;
+        case 0:
+            // Inside child process
+            syslog(LOG_DEBUG, "Successfully created child process()\n");
+            break;
+        default:
+            // Close parent process
+            close(socket_fd);
+            closelog();
+            return SERVER_SUCCESS;
+        }
+    }
+        
     char client_ip[INET6_ADDRSTRLEN];
 
     // Listen for and accept a connection, restarts when connection closed
