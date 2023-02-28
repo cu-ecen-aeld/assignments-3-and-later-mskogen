@@ -13,10 +13,10 @@ struct thread_data{
     pthread_mutex_t *mutex;
 
     // Duration in milliseconds to wait before obtaining mutex lock
-    useconds_t wait_obtain_usec;
+    struct timespec wait_obtain_time;
 
     // Duration in milliseconds to wait before releasing mutex lock
-    useconds_t wait_release_usec;
+    struct timespec wait_release_time;
 
     /**
      * Set to true if the thread completed with success, false
