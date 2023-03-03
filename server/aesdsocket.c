@@ -36,6 +36,7 @@
 #include <syslog.h>
 #include <pthread.h>
 #include <sys/queue.h>
+#include <time.h>
 
 // FreeBSD Macro for safe slist looping
 // Copied from: https://github.com/stockrt/queue.h/blob/master/queue.h
@@ -60,6 +61,8 @@ bool syslog_open = false;
 bool tmp_file_exists = false;
 pthread_mutex_t thread_mutex;
 bool mutex_active = false;
+timer_t timer;
+bool timer_active = false;
 
 struct thread_info {
     pthread_t thread_id;
@@ -91,6 +94,64 @@ static void signal_handler(int signum)
     return;
 }
 
+// Handler serviced everytime timer expires
+// String to write is RFC 2822 compliant "timestamp:%a, %d %b %Y %T %z"
+void timer_thread_handler(union sigval sv)
+{
+    int status = 0;
+    int ts_len = 0;
+    char ts_str[200];
+    char ts_format[] = "timestamp:%a, %d %b %Y %T %z\n";
+    time_t t;
+    struct tm *ts;
+    pthread_mutex_t* mutex = (pthread_mutex_t*)sv.sival_ptr;
+
+    // Fetch current time since Epoch
+    t = time(NULL);
+    if (t == ((time_t)-1)) {
+        syslog(LOG_ERR, "time(): %s\n", strerror(errno));
+        return;
+    }
+
+    // Fetch local timestamp from time since Epoch
+    ts = localtime(&t);
+    if (ts == NULL) {
+        syslog(LOG_ERR, "localtime(): %s\n", strerror(errno));
+        return;
+    }
+
+    // Ensure timestamp memory is zero'd and populate string
+    memset(&ts_str, 0, sizeof(ts_str));
+    ts_len = strftime(ts_str, sizeof(ts_str), ts_format, ts);
+
+    // Open file to log timestamp to
+    FILE* data_file = fopen(TMP_FILE, "a");
+    if (data_file == NULL) {
+        syslog(LOG_ERR, "fopen(): %s\n", strerror(errno));
+        return;
+    }
+
+    // Lock thread mutex and write to file then release
+    status = pthread_mutex_lock(mutex);
+    if (status) {
+        syslog(LOG_ERR, "pthread_mutex_lock(): %s\n", strerror(status));
+    }
+
+    if (ts_len != fwrite(&ts_str, sizeof(char), ts_len, data_file)) {
+        syslog(LOG_ERR, "Failed to write timestamp()");
+    }
+
+    status = pthread_mutex_unlock(mutex);
+    if (status) {
+        syslog(LOG_ERR, "pthread_mutex_unlock(): %s\n", strerror(status));
+    }
+
+    // If we made it here, file was opened successfully so close file
+    fclose(data_file);
+
+    return;
+}
+
 // Cleanup connections before closing
 void cleanup(bool terminate)
 {
@@ -103,6 +164,14 @@ void cleanup(bool terminate)
 
     // If we are exiting after this call, close all open file descriptors
     if (terminate) {
+        if (timer_active) {
+            status = timer_delete(timer);
+            if (status != 0) {
+                syslog(LOG_ERR, "Error timer_delete(): %s\n", strerror(errno));
+            }
+            timer_active = false;
+        }
+
         if (mutex_active) {
             status = pthread_mutex_destroy(&thread_mutex);
             if (status != 0) {
@@ -257,7 +326,7 @@ void* client_thread_func (void *thread_args)
                 }
                 status = pthread_mutex_unlock(client_info->mutex);
                 if (status) {
-                    syslog(LOG_ERR, "pthread_mutex_lock(): %s\n", strerror(status));
+                    syslog(LOG_ERR, "pthread_mutex_unlock(): %s\n", strerror(status));
                     client_errors++;
                     break;
                 }
@@ -466,6 +535,38 @@ int main(int argc, char *argv[])
         return SERVER_FAILURE;
     } else {
         mutex_active = true;
+    }
+
+    // Setup timer for logging to tmp file
+    struct sigevent timer_event;
+    struct itimerspec itime_spec;
+
+    memset(&timer_event, 0, sizeof(struct sigevent));
+    timer_event.sigev_value.sival_ptr = &thread_mutex;
+    timer_event.sigev_notify = SIGEV_THREAD;
+    timer_event.sigev_notify_function = &timer_thread_handler;
+
+    status = timer_create(CLOCK_REALTIME, &timer_event, &timer);
+
+    if (status) {
+        syslog(LOG_ERR, "Error timer_create(): %s\n", strerror(errno));
+        cleanup(true);
+        return SERVER_FAILURE;
+    } else {
+        timer_active = true;
+    }
+
+    // Set time to trigger every 10 seconds, 0 nanoseconds
+    memset(&itime_spec, 0, sizeof(struct itimerspec));
+    itime_spec.it_interval.tv_sec = 10;
+    itime_spec.it_value.tv_sec = 10;
+
+    status = timer_settime(timer, 0, &itime_spec, NULL);
+
+    if (status) {
+        syslog(LOG_ERR, "Error timer_settime(): %s\n", strerror(errno));
+        cleanup(true);
+        return SERVER_FAILURE;
     }
 
     // Loop back to accept multiple connections

@@ -2,7 +2,7 @@ PROGRAM_NAME = aesdsocket
 SRC_FILES = aesdsocket.c
 CC = gcc
 CFLAGS = -g -Werror -Wall
-LDFLAGS = -pthread
+LDFLAGS = -pthread -lrt
 
 all:
 	$(CROSS_COMPILE)$(CC) $(CFLAGS) -I. ${SRC_FILES} -o $(PROGRAM_NAME) $(LDFLAGS)
