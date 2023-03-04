@@ -1,21 +1,15 @@
-PROGRAM_NAME = aesdsocket
-SRC_FILES = aesdsocket.c
-
 # If variables aren't define, define them
-ifeq ($(CC),)
-	CC = gcc
-endif
+CC ?= $(CROSS_COMPILE)gcc
+CFLAGS ?= -g -Wall -Werror
+LDFLAGS ?= -lpthread -lrt
 
-ifeq ($(CFLAGS),)
-	CFLAGS = -g -Werror -Wall
-endif
-
-ifeq ($(LDFLAGS),)
-	LDFLAGS = -pthread -lrt
-endif
+# Project specific flags
+TARGET ?= aesdsocket
+SOURCES = aesdsocket.c
+INCLUDES = -I.
 
 all:
-	$(CROSS_COMPILE)$(CC) $(CFLAGS) -I. ${SRC_FILES} -o $(PROGRAM_NAME) $(LDFLAGS)
+	$(CC) $(CFLAGS) $(INCLUDES) ${SOURCES} -o $(TARGET) $(LDFLAGS)
 
 clean:
 	rm -f $(PROGRAM_NAME) *.o
