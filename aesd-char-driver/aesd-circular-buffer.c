@@ -154,7 +154,4 @@ void aesd_circular_buffer_add_entry(struct aesd_circular_buffer *buffer, const s
 void aesd_circular_buffer_init(struct aesd_circular_buffer *buffer)
 {
     memset(buffer,0,sizeof(struct aesd_circular_buffer));
-    buffer->full = false;
-    buffer->in_offs = 0;
-    buffer->out_offs = 0;
 }
