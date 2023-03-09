@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 
 # exit value 1, print statement for missing parameters
 if [ ! $# -eq 2 ]
