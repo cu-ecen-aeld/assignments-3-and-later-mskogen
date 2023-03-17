@@ -54,11 +54,14 @@ This first line, "`Unable to handle kernel NULL pointer dereference at virtual a
 pc : faulty_write+0x14/0x20 [faulty]
 ```
 
-If we break this down further it is telling us that the NULL pointer dereference happened at the instruction address that is 0x14 or 20 bytes into the `faulty_write` function  and the instruction is 0x20 or 32 bytes long.
-
-If we look at an `objdump` of the faulty driver we can see the assembly instructions for the faulty_write function:
+If we break this down further it is telling us that the NULL pointer dereference happened at the instruction address that is 0x14 or 20 bytes into the `faulty_write` function and the instruction is 0x20 or 32 bytes long. We can use our cross compiled `aarch64-linux-objdump` binary to disassemble the cross compiled `faulty.ko` driver module to see the assembly instructions actually used for running on our qemu target instance in the `faulty_write` function:
 
 ```
+mskogen@matts-vm:~/AESD/A5/assignment-5-mskogen$ buildroot/output/host/bin/aarch64-linux-objdump -S buildroot/output/build/ldd-9982319c45f55ed773ae00a52764ca8042938d89/misc-modules/faulty.ko 
+
+buildroot/output/build/ldd-9982319c45f55ed773ae00a52764ca8042938d89/misc-modules/faulty.ko:     file format elf64-littleaarch64
+
+
 Disassembly of section .text:
 
 0000000000000000 <faulty_write>:
