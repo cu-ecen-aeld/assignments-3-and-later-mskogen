@@ -51,7 +51,7 @@ int aesd_release(struct inode *inode, struct file *filp)
 
 /* 
  * Return partial or full content of recent 10 write commands in order received,
- * for any read attempt. Use filp to determine where to start read and count
+ * for any read attempt. Use f_pos to determine where to start read and count
  * specifies the number of bytes to return.
  */
 ssize_t aesd_read(struct file *filp, char __user *buf, size_t count,
@@ -59,9 +59,8 @@ ssize_t aesd_read(struct file *filp, char __user *buf, size_t count,
 {
     ssize_t retval = 0;
     struct aesd_dev *dev = filp->private_data;
-    struct aesd_buffer_entry *entry, *end_entry;
-    size_t end_entry_off = 0;
-    uint8_t index;
+    struct aesd_buffer_entry *start_entry;
+    size_t start_entry_off = 0, read_length = 0;
 
     PDEBUG("read %zu bytes with offset %lld", count, *f_pos);
 
@@ -71,44 +70,35 @@ ssize_t aesd_read(struct file *filp, char __user *buf, size_t count,
         goto closeout;
     }
 
-    // Check if we need to read all or some of buffer
-    end_entry = aesd_circular_buffer_find_entry_offset_for_fpos(&dev->aesd_cb,
-            count, &end_entry_off);
+    // Check if start position is valid
+    start_entry = aesd_circular_buffer_find_entry_offset_for_fpos(&dev->aesd_cb,
+            *f_pos, &start_entry_off);
 
-    if (end_entry == NULL) {
-        // to many bytes, we will only read what's available (i.e the who buffer)
-        AESD_CIRCULAR_BUFFER_FOREACH(entry, &dev->aesd_cb, index) {
-            if ((entry->buffptr != NULL) && (entry->size > 0)) {
-                if (copy_to_user(buf, entry->buffptr, entry->size)) {
-                    retval = -EFAULT;
-                    goto closeout;
-                }
-                retval += entry->size;
-            }
-        }
-    } else {
-        // Only read up to entry returned and bytes returned in that offset
-        AESD_CIRCULAR_BUFFER_FOREACH(entry, &dev->aesd_cb, index) {
-            if ((entry->buffptr != NULL) && (entry->size > 0)) {
-                if (entry == end_entry) {
-                    if (copy_to_user(buf, entry->buffptr, end_entry_off)) {
-                        retval = -EFAULT;
-                        goto closeout;
-                    }
-                    retval += end_entry_off;
-                    goto closeout;
-                } else {
-                    if (copy_to_user(buf, entry->buffptr, entry->size)) {
-                        retval = -EFAULT;
-                        goto closeout;
-                    }
-                    retval += entry->size;
-                }
-            }
-        }
+    if (start_entry == NULL) {
+        PDEBUG("Offset out of range, return error");
+        retval = -EFAULT;
+        goto closeout;
+    } 
+    
+    // Truncate read if there are more bytes in command than requested to read
+    PDEBUG("Found a starting entry reading from there");
+    read_length = start_entry->size - start_entry_off;
+    if (read_length > count) {
+        read_length = count;
     }
 
+    if (copy_to_user(buf, &start_entry->buffptr[start_entry_off], read_length)) {
+        retval = -EFAULT;
+        goto closeout;
+    }
+
+    // Update return value and file position for next read
+    PDEBUG("Successfully read %ld bytes!", read_length);
+    retval = read_length;
+    *f_pos = *f_pos + read_length;
+
     closeout:
+        PDEBUG("Read is returning value %ld", retval);
         return retval;
 }
 
