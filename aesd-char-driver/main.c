@@ -123,9 +123,10 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
     ssize_t retval = -ENOMEM;
     struct aesd_dev *dev = filp->private_data;
     struct aesd_buffer_entry *p_entry, tmp_entry;
-    uint8_t in_pos = 0, out_pos = 0;
-    memset(tmp_entry, 0, sizeof(struct aesd_buffer_entry));
-    tmp_entry.size = count;
+    char* tmp_buffer = NULL;
+    size_t tmp_size = count;
+    uint8_t in_pos = 0;
+    memset(&tmp_entry, 0, sizeof(struct aesd_buffer_entry));
 
     PDEBUG("write %zu bytes with offset %lld", count, *f_pos);
 
@@ -144,50 +145,59 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
     // find current write position, free memory if we are full before creating
     // new node
     in_pos = dev->aesd_cb.in_offs;
-    p_entry = dev->aesd_cb.entry[in_pos];
+    p_entry = &dev->aesd_cb.entry[in_pos];
     if (dev->partial) {
         // Writing to an untermintated command string.
-        // Update size for buffer and reallocate memory
-        tmp_entry.size += p_entry->size;
-        tmp_entry.buffptr = krealloc(p_entry->buffptr, tmp_entry.size, GFP_KERNEL);
-        if (!tmp_entry.buffptr) {
+        // Update size for buffer and allocate for new memory
+        tmp_size += p_entry->size;
+        tmp_buffer = kmalloc(tmp_size, GFP_KERNEL);
+        if (!tmp_buffer) {
             goto closeout;
         }
 
         // Make sure memory is zero'd for new write
-        memset(&tmp_entry.buffptr[p_entry->size], 0, count);
+        memset(tmp_buffer, 0, tmp_size);
+
+        if (p_entry->buffptr != NULL) {
+            // Copy memory from current partial string and free old memory
+            memcpy(tmp_buffer, p_entry->buffptr, p_entry->size);
+            kfree(p_entry->buffptr);
+        }
 
         // Write new buffer from userspace
-        if(copy_from_user(&tmp_entry.buffptr[p_entry->size], buf, count)) {
-            retval = -EFAULT
+        if(copy_from_user(&tmp_buffer[p_entry->size], buf, count)) {
+            retval = -EFAULT;
             goto closeout;
         }
 
         // Update entry with new buffer
-        p_entry->buffptr = tmp_entry.buffptr;
-        p_entry->size = tmp_entry.size;
+        p_entry->buffptr = tmp_buffer;
+        p_entry->size = tmp_size;
     } else {
         // Writing a new command, check if we need to free memory
         if (dev->aesd_cb.full) {
             if (p_entry->buffptr != NULL) {
-                free(p_entry->buffptr);
+                kfree(p_entry->buffptr);
             }
             p_entry->size = 0;
         }
 
-        tmp_entry.buffptr = kmalloc(tmp_entry.size, GFP_KERNEL);
-        if (!tmp_entry.buffptr) {
+        tmp_buffer = kmalloc(tmp_size, GFP_KERNEL);
+        if (!tmp_buffer) {
             goto closeout;
         }
 
         // Make sure memory is zero'd for new write
-        memset(tmp_entry.buffptr, 0, tmp_entry.size);
+        memset(tmp_buffer, 0, tmp_size);
 
         // Write new buffer from userspace
-        if(copy_from_user(tmp_entry.buffptr, buf, count)) {
-            retval = -EFAULT
+        if(copy_from_user(tmp_buffer, buf, count)) {
+            retval = -EFAULT;
             goto closeout;
         }
+
+        tmp_entry.buffptr = tmp_buffer;
+        tmp_entry.size = tmp_size;
 
         // Add new entry to circular buffer
         aesd_circular_buffer_add_entry(&dev->aesd_cb, &tmp_entry);
@@ -195,7 +205,7 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
 
     // See if we need to set/reset partial flag
     // Might need to analyze if the write command has multiple commands in it
-    if (strchr(tmp_entry.buffptr, (int)'\n')) {
+    if (strchr(tmp_buffer, (int)'\n')) {
         dev->partial = false;
     } else {
         dev->partial = true;
@@ -249,7 +259,7 @@ int aesd_init_module(void)
     // Initialize the AESD specific portion of the device
     // Zero out circular buffer, temporary buffer entry, and initialize mutex
     aesd_circular_buffer_init(&aesd_device.aesd_cb);
-    memset(&aesd_device.tmp_entry, 0, sizeof(struct aesd_buffer_entry));
+    aesd_device.partial = false;
     mutex_init(&aesd_device.mx_lock);
 
     result = aesd_setup_cdev(&aesd_device);
@@ -263,17 +273,18 @@ int aesd_init_module(void)
 
 void aesd_cleanup_module(void)
 {
+    uint8_t index;
+    struct aesd_circular_buffer *buffer = &aesd_device.aesd_cb;
+    struct aesd_buffer_entry *entry;
+
     dev_t devno = MKDEV(aesd_major, aesd_minor);
 
     cdev_del(&aesd_device.cdev);
 
     // Deallocate all the buffer entries in the circular buffer and destroy mutex
-    uint8_t index;
-    struct aesd_circular_buffer *buffer = &aesd_device.aesd_cb;
-    struct aesd_buffer_entry *entry;
     AESD_CIRCULAR_BUFFER_FOREACH(entry, buffer, index) {
         if ((entry->size > 0) && (entry->buffptr != NULL)) {
-            free(entry->buffptr);
+            kfree(entry->buffptr);
         }
     }
     mutex_destroy(&aesd_device.mx_lock);
