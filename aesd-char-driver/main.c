@@ -75,8 +75,8 @@ ssize_t aesd_read(struct file *filp, char __user *buf, size_t count,
             *f_pos, &start_entry_off);
 
     if (start_entry == NULL) {
-        PDEBUG("Offset out of range, return error");
-        retval = -EFAULT;
+        PDEBUG("Nothing to read");
+        retval = 0;
         goto closeout;
     } 
     
@@ -277,6 +277,7 @@ void aesd_cleanup_module(void)
     AESD_CIRCULAR_BUFFER_FOREACH(entry, buffer, index) {
         if ((entry->size > 0) && (entry->buffptr != NULL)) {
             kfree(entry->buffptr);
+            entry->size = 0;
         }
     }
     mutex_destroy(&aesd_device.mx_lock);
