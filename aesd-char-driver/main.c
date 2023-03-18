@@ -28,10 +28,10 @@ struct aesd_dev aesd_device;
 
 int aesd_open(struct inode *inode, struct file *filp)
 {
-    PDEBUG("open");
-    
     // Aesd char device
     struct aesd_dev *dev;
+
+    PDEBUG("open");
 
     // Store device info in file private data field
     dev = container_of(inode->i_cdev, struct aesd_dev, cdev);
@@ -56,6 +56,11 @@ ssize_t aesd_read(struct file *filp, char __user *buf, size_t count,
                 loff_t *f_pos)
 {
     ssize_t retval = 0;
+    struct aesd_dev *dev = filp->private_data;
+    struct aesd_buffer_entry *entry, *end_entry;
+    size_t end_entry_off = 0;
+    uint8_t index;
+
     PDEBUG("read %zu bytes with offset %lld", count, *f_pos);
 
     // If the userspace buffer is NULL we can't do anything useful
@@ -63,11 +68,6 @@ ssize_t aesd_read(struct file *filp, char __user *buf, size_t count,
         retval = -EFAULT;
         goto closeout;
     }
-
-    struct aesd_dev *dev = filp->private_data;
-    struct aesd_buffer_entry *entry, *end_entry;
-    size_t end_entry_off = 0;
-    uint8_t index;
 
     // Check if we need to read all or some of buffer
     end_entry = aesd_circular_buffer_find_entry_offset_for_fpos(&dev->aesd_cb,
@@ -121,6 +121,12 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
                 loff_t *f_pos)
 {
     ssize_t retval = -ENOMEM;
+    struct aesd_dev *dev = filp->private_data;
+    struct aesd_buffer_entry *p_entry, tmp_entry;
+    uint8_t in_pos = 0, out_pos = 0;
+    memset(tmp_entry, 0, sizeof(struct aesd_buffer_entry));
+    tmp_entry.size = count;
+
     PDEBUG("write %zu bytes with offset %lld", count, *f_pos);
 
     // If the userspace buffer is NULL we can't do anything useful
@@ -128,12 +134,6 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
         retval = -EFAULT;
         goto closeout;
     }
-
-    struct aesd_dev *dev = filp->private_data;
-    struct aesd_buffer_entry *p_entry, tmp_entry;
-    uint8_t in_pos = 0, out_pos = 0;
-    memset(tmp_entry, 0, sizeof(struct aesd_buffer_entry));
-    tmp_entry.size = count;
 
     // lock and allow only one write file at a time, do interruptible lock so
     // we can kill process if needed
