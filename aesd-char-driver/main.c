@@ -161,16 +161,7 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
         dev->tmp_entry.size = p_entry->size;
     } else {
         // Writing a new command
-        // Fetch current in position for a new buffer entry and free if full
-        in_pos = dev->aesd_cb.in_offs;
-        p_entry = &dev->aesd_cb.entry[in_pos];
-        if (dev->aesd_cb.full) {
-            if (p_entry->buffptr != NULL) {
-                kfree(p_entry->buffptr);
-            }
-            p_entry->size = 0;
-        }
-
+        // Allocate memory for new write
         tmp_buffer = kmalloc(count, GFP_KERNEL);
         if (!tmp_buffer) {
             retval = -ENOMEM;
@@ -181,10 +172,12 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
         memset(tmp_buffer, 0, count);
 
         // Write new buffer from userspace
+        PDEBUG("user string '%s' copied", buf);
         if(copy_from_user(tmp_buffer, buf, count)) {
             retval = -EFAULT;
             goto closeout;
         }
+        PDEBUG("tmp_buffer now '%s'", tmp_buffer);
 
         retval = count;
         dev->tmp_entry.buffptr = tmp_buffer;
@@ -194,12 +187,23 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
     // See if we need to set/reset partial flag
     // Might need to analyze if the write command has multiple commands in it
     if (strchr(dev->tmp_entry.buffptr, '\n')) {
+        // Adding new entry, check if current entry will be overwritten and must
+        // be freed
+        if (dev->aesd_cb.full) {
+            in_pos = dev->aesd_cb.in_offs;
+            p_entry = &dev->aesd_cb.entry[in_pos];
+            if (p_entry->buffptr != NULL) {
+                kfree(p_entry->buffptr);
+            }
+            p_entry->size = 0;
+        }
+
         // Add new entry to circular buffer
         aesd_circular_buffer_add_entry(&dev->aesd_cb, &dev->tmp_entry);
+        PDEBUG("Added entry of %zu bytes '%s' to buffer", retval, dev->tmp_entry.buffptr);
         dev->partial = false;
         kfree(dev->tmp_entry.buffptr);
         dev->tmp_entry.size = 0;
-        PDEBUG("Added entry of %zu bytes to buffer", retval);
     } else {
         dev->partial = true;
         PDEBUG("Partial write to tmp entry of %zu bytes", retval);
