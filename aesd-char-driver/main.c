@@ -87,10 +87,7 @@ ssize_t aesd_read(struct file *filp, char __user *buf, size_t count,
         read_length = count;
     }
 
-    PDEBUG("start_entry_off is %li", start_entry_off);
-    PDEBUG("buffer at start_entry is %s", start_entry->buffptr);
-    PDEBUG("buffer at start_entry is %s", start_entry->buffptr + start_entry_off);
-    
+    PDEBUG("buffer at start_entry is %s",  &(start_entry->buffptr[start_entry_off]));
     if (copy_to_user(buf, &(start_entry->buffptr[start_entry_off]), read_length)) {
         retval = -EFAULT;
         goto closeout;
@@ -190,9 +187,9 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
 
     // See if we need to set/reset partial flag
     // Might need to analyze if the write command has multiple commands in it
-    if (strchr(dev->tmp_entry.buffptr, '\n')) {
-        // Adding new entry, check if current entry will be overwritten and must
-        // be freed
+    if (memchr(dev->tmp_entry.buffptr, '\n', dev->tmp_entry.size)) {
+        // Found newline. Adding new entry...
+        // Check if current entry will be overwritten and must be freed first
         if (dev->aesd_cb.full) {
             in_pos = dev->aesd_cb.in_offs;
             p_entry = &dev->aesd_cb.entry[in_pos];
@@ -205,11 +202,11 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
         // Add new entry to circular buffer
         aesd_circular_buffer_add_entry(&dev->aesd_cb, &dev->tmp_entry);
         PDEBUG("Added entry of %zu bytes '%s' to buffer", retval, dev->tmp_entry.buffptr);
-        dev->partial = false;
 
         // Don't free memory of buffer pointer because it gets freed later by
         // the aesd_cleanup_module function or before being overwritten.
         // Instead set pointer to NULL to start a new temporary entry
+        dev->partial = false;
         dev->tmp_entry.buffptr = NULL;
         dev->tmp_entry.size = 0;
     } else {
