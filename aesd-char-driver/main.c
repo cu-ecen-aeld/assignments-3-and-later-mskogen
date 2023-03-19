@@ -206,7 +206,11 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
         aesd_circular_buffer_add_entry(&dev->aesd_cb, &dev->tmp_entry);
         PDEBUG("Added entry of %zu bytes '%s' to buffer", retval, dev->tmp_entry.buffptr);
         dev->partial = false;
-        kfree(dev->tmp_entry.buffptr);
+
+        // Don't free memory of buffer pointer because it gets freed later by
+        // the aesd_cleanup_module function or before being overwritten.
+        // Instead set pointer to NULL to start a new temporary entry
+        dev->tmp_entry.buffptr = NULL;
         dev->tmp_entry.size = 0;
     } else {
         dev->partial = true;
