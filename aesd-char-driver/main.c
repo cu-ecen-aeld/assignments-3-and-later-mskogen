@@ -115,9 +115,9 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
 {
     ssize_t retval = -ENOMEM;
     struct aesd_dev *dev = filp->private_data;
-    struct aesd_buffer_entry *p_entry = NULL;
-    char* tmp_buffer = NULL;
+    struct aesd_buffer_entry new_entry;
     uint8_t in_pos = 0;
+    size_t bytes_missing = 0;
 
     PDEBUG("write %zu bytes with offset %lld", count, *f_pos);
 
@@ -133,85 +133,74 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
         return -ERESTARTSYS;
     }
 
-    // find current write position, free memory if we are full before creating
-    // new node
-    if (dev->partial) {
+    // Check if there is a temporary entry that hasn't been added to buffer
+    if (dev->tmp_size > 0) {
         // Writing to an untermintated command string.
         // Update size for buffer and allocate for new memory
-        p_entry = &dev->tmp_entry;
-        p_entry->size += count;
-        tmp_buffer = krealloc(p_entry->buffptr, p_entry->size, GFP_KERNEL);
-        if (!tmp_buffer) {
+        dev->tmp_buf = krealloc(dev->tmp_buf, dev->tmp_size + count, GFP_KERNEL);
+        if (!dev->tmp_buf) {
             retval = -ENOMEM;
             goto closeout;
         }
 
         // Make sure memory is zero'd for new write
-        memset(&tmp_buffer[p_entry->size], 0, count);
+        memset(&dev->tmp_buf[dev->tmp_size], 0, count);
 
-        // Write new buffer from userspace
-        if(copy_from_user(&tmp_buffer[p_entry->size], buf, count)) {
-            retval = -EFAULT;
-            goto closeout;
-        }
+        // Write new buffer from userspace, save any bytes missed for return val
+        bytes_missing = copy_from_user(&dev->tmp_buf[dev->tmp_size], buf, count);
 
-        retval = count;
+        // Set retval for number of bytes actually copied and update size
+        // of the tmp_entry
+        retval = count - bytes_missing;
+        dev->tmp_size += retval;
 
-        // Update tmp_entry with new buffer
-        dev->tmp_entry.buffptr = tmp_buffer;
-        dev->tmp_entry.size = p_entry->size;
     } else {
         // Writing a new command
         // Allocate memory for new write
-        tmp_buffer = kmalloc(count, GFP_KERNEL);
-        if (!tmp_buffer) {
+        dev->tmp_buf = kmalloc(count, GFP_KERNEL);
+        if (!dev->tmp_buf) {
             retval = -ENOMEM;
             goto closeout;
         }
 
         // Make sure memory is zero'd for new write
-        memset(tmp_buffer, 0, count);
+        memset(dev->tmp_buf, 0, count);
 
         // Write new buffer from userspace
-        PDEBUG("user string '%s' copied", buf);
-        if(copy_from_user(tmp_buffer, buf, count)) {
-            retval = -EFAULT;
-            goto closeout;
-        }
-        PDEBUG("tmp_buffer now '%s'", tmp_buffer);
+        // Write new buffer from userspace, save any bytes missed for return val
+        bytes_missing = copy_from_user(dev->tmp_buf, buf, count);
 
-        retval = count;
-        dev->tmp_entry.buffptr = tmp_buffer;
-        dev->tmp_entry.size = count;
+        retval = count - bytes_missing;
+        dev->tmp_size = retval;
     }
 
     // See if we need to set/reset partial flag
     // Might need to analyze if the write command has multiple commands in it
-    if (memchr(dev->tmp_entry.buffptr, '\n', dev->tmp_entry.size)) {
+    if (memchr(dev->tmp_buf, '\n', dev->tmp_size)) {
         // Found newline. Adding new entry...
         // Check if current entry will be overwritten and must be freed first
         if (dev->aesd_cb.full) {
             in_pos = dev->aesd_cb.in_offs;
-            p_entry = &dev->aesd_cb.entry[in_pos];
-            if (p_entry->buffptr != NULL) {
-                kfree(p_entry->buffptr);
+            if (dev->aesd_cb.entry[in_pos].buffptr != NULL) {
+                kfree(dev->aesd_cb.entry[in_pos].buffptr);
             }
-            p_entry->size = 0;
+            dev->aesd_cb.entry[in_pos].size = 0;
         }
 
         // Add new entry to circular buffer
-        aesd_circular_buffer_add_entry(&dev->aesd_cb, &dev->tmp_entry);
-        PDEBUG("Added entry of %zu bytes '%s' to buffer", retval, dev->tmp_entry.buffptr);
+        new_entry.buffptr = dev->tmp_buf;
+        new_entry.size = dev->tmp_size;
+        aesd_circular_buffer_add_entry(&dev->aesd_cb, &new_entry);
+        PDEBUG("Added entry of %zu bytes '%s' to buffer", new_entry.size, new_entry.buffptr);
 
         // Don't free memory of buffer pointer because it gets freed later by
         // the aesd_cleanup_module function or before being overwritten.
         // Instead set pointer to NULL to start a new temporary entry
-        dev->partial = false;
-        dev->tmp_entry.buffptr = NULL;
-        dev->tmp_entry.size = 0;
+        dev->tmp_buf = NULL;
+        dev->tmp_size = 0;
     } else {
-        dev->partial = true;
-        PDEBUG("Partial write to tmp entry of %zu bytes", retval);
+        PDEBUG("Partial write to tmp entry, now %zu bytes", dev->tmp_size);
+        PDEBUG("Tmp entry buf is '%s'", dev->tmp_buf);
     }
 
     closeout:
@@ -259,8 +248,8 @@ int aesd_init_module(void)
     // Initialize the AESD specific portion of the device
     // Zero out circular buffer, temporary buffer entry, and initialize mutex
     aesd_circular_buffer_init(&aesd_device.aesd_cb);
-    memset(&aesd_device.tmp_entry, 0, sizeof(struct aesd_buffer_entry));
-    aesd_device.partial = false;
+    aesd_device.tmp_buf = NULL;
+    aesd_device.tmp_size = 0;
     mutex_init(&aesd_device.mx_lock);
 
     result = aesd_setup_cdev(&aesd_device);
