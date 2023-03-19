@@ -137,7 +137,7 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
     if (dev->partial) {
         // Writing to an untermintated command string.
         // Update size for buffer and allocate for new memory
-        p_entry = dev->tmp_entry;
+        p_entry = &dev->tmp_entry;
         p_entry->size += count;
         tmp_buffer = krealloc(p_entry->buffptr, p_entry->size, GFP_KERNEL);
         if (!tmp_buffer) {
@@ -157,8 +157,8 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
         retval = count;
 
         // Update tmp_entry with new buffer
-        dev->tmp_entry->buffptr = tmp_buffer;
-        dev->tmp_entry->size = p_entry->size;
+        dev->tmp_entry.buffptr = tmp_buffer;
+        dev->tmp_entry.size = p_entry->size;
     } else {
         // Writing a new command
         // Fetch current in position for a new buffer entry and free if full
@@ -187,18 +187,18 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
         }
 
         retval = count;
-        dev->tmp_entry->buffptr = tmp_buffer;
-        dev->tmp_entry->size = count;
+        dev->tmp_entry.buffptr = tmp_buffer;
+        dev->tmp_entry.size = count;
     }
 
     // See if we need to set/reset partial flag
     // Might need to analyze if the write command has multiple commands in it
-    if (strchr(dev->tmp_entry->buffptr, '\n')) {
+    if (strchr(dev->tmp_entry.buffptr, '\n')) {
         // Add new entry to circular buffer
-        aesd_circular_buffer_add_entry(&dev->aesd_cb, dev->tmp_entry);
+        aesd_circular_buffer_add_entry(&dev->aesd_cb, &dev->tmp_entry);
         dev->partial = false;
-        kfree(dev->tmp_entry->buffptr);
-        dev->tmp_entry->size = 0;
+        kfree(dev->tmp_entry.buffptr);
+        dev->tmp_entry.size = 0;
         PDEBUG("Added entry of %zu bytes to buffer", retval);
     } else {
         dev->partial = true;
@@ -250,7 +250,7 @@ int aesd_init_module(void)
     // Initialize the AESD specific portion of the device
     // Zero out circular buffer, temporary buffer entry, and initialize mutex
     aesd_circular_buffer_init(&aesd_device.aesd_cb);
-    aesd_device.tmp_entry = NULL;
+    memset(&aesd_device.tmp_entry, 0, sizeof(struct aesd_buffer_entry));
     aesd_device.partial = false;
     mutex_init(&aesd_device.mx_lock);
 

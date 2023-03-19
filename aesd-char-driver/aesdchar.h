@@ -28,7 +28,7 @@
 struct aesd_dev
 {
      struct aesd_circular_buffer aesd_cb;    // aesd circular buffer
-     struct aesd_buffer_entry *tmp_entry;    // unterminated command
+     struct aesd_buffer_entry tmp_entry;     // unterminated command
      bool partial;                           // current buffer isn't full
      struct mutex mx_lock;                   // Mutex lock
      struct cdev cdev;                       // Char device structure
