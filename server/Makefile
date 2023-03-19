@@ -7,10 +7,10 @@ LDFLAGS ?= -lpthread -lrt
 TARGET ?= aesdsocket
 SOURCES = aesdsocket.c
 INCLUDES = -I.
-CFLAGS += -DUSE_AESD_CHAR_DEVICE=1
+EXTRA_CFLAGS = -DUSE_AESD_CHAR_DEVICE=1
 
 all:
-	$(CC) $(CFLAGS) $(INCLUDES) ${SOURCES} -o $(TARGET) $(LDFLAGS)
+	$(CC) $(CFLAGS) $(EXTRA_CFLAGS) $(INCLUDES) ${SOURCES} -o $(TARGET) $(LDFLAGS)
 
 clean:
 	rm -f $(PROGRAM_NAME) *.o
