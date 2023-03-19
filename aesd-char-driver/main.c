@@ -88,7 +88,8 @@ ssize_t aesd_read(struct file *filp, char __user *buf, size_t count,
     }
 
     PDEBUG("start_entry_off is %li", start_entry_off);
-    PDEBUG("buffer at start_entry is %s", &(start_entry->buffptr[start_entry_off]));
+    PDEBUG("buffer at start_entry is %s", start_entry->buffptr);
+    PDEBUG("buffer at start_entry is %s", start_entry->buffptr + start_entry_off);
     
     if (copy_to_user(buf, &(start_entry->buffptr[start_entry_off]), read_length)) {
         retval = -EFAULT;
