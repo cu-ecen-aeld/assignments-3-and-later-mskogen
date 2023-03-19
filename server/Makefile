@@ -1,6 +1,6 @@
 # If variables aren't define, define them
 CC ?= $(CROSS_COMPILE)gcc
-CFLAGS ?= -g -Wall -Werror
+CFLAGS ?= -g -Wall -Werror -DUSE_AESD_CHAR_DEVICE=1
 LDFLAGS ?= -lpthread -lrt
 
 # Project specific flags
