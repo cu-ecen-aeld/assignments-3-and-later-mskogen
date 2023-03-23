@@ -50,7 +50,11 @@
 #define SERVER_SUCCESS      (0)
 #define SERVER_FAILURE      (-1)
 #define SERVER_PORT         ("9000")
-#define TMP_FILE            ("/var/tmp/aesdsocketdata")
+#if USE_AESD_CHAR_DEVICE == 1
+    #define TMP_FILE            ("/dev/aesdchar")
+#else
+    #define TMP_FILE            ("/var/tmp/aesdsocketdata")
+#endif
 #define READ_SIZE           (1024)
 #define WRITE_SIZE          (1024)
 
@@ -61,8 +65,11 @@ bool syslog_open = false;
 bool tmp_file_exists = false;
 pthread_mutex_t thread_mutex;
 bool mutex_active = false;
+
+#if USE_AESD_CHAR_DEVICE == 0
 timer_t timer;
 bool timer_active = false;
+#endif
 
 struct thread_info {
     pthread_t thread_id;
@@ -94,6 +101,7 @@ static void signal_handler(int signum)
     return;
 }
 
+#if USE_AESD_CHAR_DEVICE == 0
 // Handler serviced everytime timer expires
 // String to write is RFC 2822 compliant "timestamp:%a, %d %b %Y %T %z"
 void timer_thread_handler(union sigval sv)
@@ -151,6 +159,7 @@ void timer_thread_handler(union sigval sv)
 
     return;
 }
+#endif
 
 // Cleanup connections before closing
 void cleanup(bool terminate)
@@ -164,6 +173,7 @@ void cleanup(bool terminate)
 
     // If we are exiting after this call, close all open file descriptors
     if (terminate) {
+#if USE_AESD_CHAR_DEVICE == 0
         if (timer_active) {
             status = timer_delete(timer);
             if (status != 0) {
@@ -171,6 +181,7 @@ void cleanup(bool terminate)
             }
             timer_active = false;
         }
+#endif
 
         if (mutex_active) {
             status = pthread_mutex_destroy(&thread_mutex);
@@ -537,6 +548,7 @@ int main(int argc, char *argv[])
         mutex_active = true;
     }
 
+#if USE_AESD_CHAR_DEVICE == 0
     // Setup timer for logging to tmp file
     struct sigevent timer_event;
     struct itimerspec itime_spec;
@@ -568,6 +580,7 @@ int main(int argc, char *argv[])
         cleanup(true);
         return SERVER_FAILURE;
     }
+#endif
 
     // Loop back to accept multiple connections
     while (!exit_status)
