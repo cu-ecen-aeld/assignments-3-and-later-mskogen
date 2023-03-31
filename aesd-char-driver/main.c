@@ -20,6 +20,8 @@
 #include <linux/slab.h>		// kmalloc()
 
 #include "aesdchar.h"
+#include "aesd_ioctl.h"
+
 int aesd_major =   0; // use dynamic major
 int aesd_minor =   0;
 
@@ -203,9 +205,124 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
         PDEBUG("Tmp entry buf is '%s'", dev->tmp_buf);
     }
 
+    // Update device buffer size for successful writes
+    dev->buf_size += retval;
+
     closeout:
         mutex_unlock(&dev->mx_lock);
         return retval;
+}
+
+loff_t aesd_llseek(struct file *filp, loff_t off, int whence)
+{
+    struct aesd_dev *dev = filp->private_data;
+    loff_t newpos;
+
+    // Determine new position offset value to update file pointer too
+    switch(whence) {
+        case SEEK_SET:
+            // Beginning of device
+            newpos = off;
+            break;
+        case SEEK_CUR:
+            // Specific location on device
+            newpos = filp->f_pos + off;
+            break;
+        case SEEK_END:
+            // End of device
+            newpos = dev->buf_size + off;
+            break;
+        default:
+            // Invalid, shouldn't ever hit this
+            return -EINVAL;
+    }
+
+    // Check validity of new position, can't be negative or larger than the size
+    // of the buffer
+    if (newpos < 0) {
+        return -EINVAL;
+    }
+
+    if (newpos > dev->buf_size) {
+        return -EINVAL;
+    }
+
+    // Set new file position
+    filp->f_pos = newpos;
+    return newpos;
+}
+
+long aesd_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
+{
+    struct aesd_dev *dev = filp->private_data;
+    struct aesd_seekto seek_cmd;
+    struct aesd_buffer_entry *entry;
+    loff_t loc_off = 0;
+    uint32_t index;
+    long retval = 0;
+
+    switch (cmd) {
+        case AESDCHAR_IOCSEEKTO:
+
+            // if (access_ok((struct aesd_seekto __user *)arg, sizeof(struct aesd_seekto))) {
+            //     retval = __get_user(seek_cmd, (struct aesd_seekto __user *)arg);
+            // } else {
+            //     retval = -EINVAL;
+            //     break;
+            // }
+
+            retval = copy_from_user(&seek_cmd, (struct aesd_seekto __user *)arg,
+                sizeof(struct aesd_seekto));
+
+            if (retval) {
+                break;
+            }
+
+            // Seek to command specified by write_cmd to offset specified
+            // by write_cmd_offset. If either of the two values is out of range
+            // then return -EINVAL. returns zero for successful seek.
+            if ((seek_cmd.write_cmd < 0) ||
+               (seek_cmd.write_cmd > AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED))
+            {
+                retval = -EINVAL;
+                break;
+            }
+
+            for (index = 0; index < seek_cmd.write_cmd; index++) {
+                entry = &dev->aesd_cb.entry[index];
+                if ((entry->buffptr != NULL) && (entry->size > 0)) {
+                    loc_off += entry->size;
+                } else {
+                    // buffer isn't large enough for specified write_cmd
+                    retval = -EINVAL;
+                    break;
+                }
+            }
+
+            entry = &dev->aesd_cb.entry[seek_cmd.write_cmd];
+            if ((entry->buffptr != NULL) && (entry->size > 0)) {
+                if (seek_cmd.write_cmd_offset > entry->size) {
+                    // write_cmd is not big enough
+                    retval = -EINVAL;
+                    break;                
+                }
+                loc_off += seek_cmd.write_cmd_offset;
+            } else {
+                // buffer isn't large enough for specified write_cmd
+                retval = -EINVAL;
+                break;
+            }
+
+            // Update file pointer position and return zero for success
+            filp->f_pos = loc_off;
+
+            break;
+        default:
+            // Invalid/Unknown ioctl
+            retval = -EINVAL;
+    }
+
+    return retval;
 }
 
 struct file_operations aesd_fops = {
@@ -214,6 +331,8 @@ struct file_operations aesd_fops = {
     .write =    aesd_write,
     .open =     aesd_open,
     .release =  aesd_release,
+    .llseek =   aesd_llseek,
+    .compat_ioctl = aesd_ioctl,
 };
 
 static int aesd_setup_cdev(struct aesd_dev *dev)
@@ -248,6 +367,7 @@ int aesd_init_module(void)
     // Initialize the AESD specific portion of the device
     // Zero out circular buffer, temporary buffer entry, and initialize mutex
     aesd_circular_buffer_init(&aesd_device.aesd_cb);
+    aesd_device.buf_size = 0;
     aesd_device.tmp_buf = NULL;
     aesd_device.tmp_size = 0;
     mutex_init(&aesd_device.mx_lock);

@@ -28,6 +28,7 @@
 struct aesd_dev
 {
      struct aesd_circular_buffer aesd_cb;    // aesd circular buffer
+     unsigned long buf_size;                 // cb size in bytes
      char *tmp_buf;                          // unterminated command buffer
      size_t tmp_size;                        // untermindate size
      struct mutex mx_lock;                   // Mutex lock
