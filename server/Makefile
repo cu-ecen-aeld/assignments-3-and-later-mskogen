@@ -6,7 +6,7 @@ LDFLAGS ?= -lpthread -lrt
 # Project specific flags
 TARGET ?= aesdsocket
 SOURCES = aesdsocket.c
-INCLUDES = -I.
+INCLUDES = -I. -I../aesd-char-driver
 EXTRA_CFLAGS = -DUSE_AESD_CHAR_DEVICE=1
 
 all:

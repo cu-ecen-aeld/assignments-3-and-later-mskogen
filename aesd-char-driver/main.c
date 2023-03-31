@@ -264,17 +264,9 @@ long aesd_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
     switch (cmd) {
         case AESDCHAR_IOCSEEKTO:
 
-            // if (access_ok((struct aesd_seekto __user *)arg, sizeof(struct aesd_seekto))) {
-            //     retval = __get_user(seek_cmd, (struct aesd_seekto __user *)arg);
-            // } else {
-            //     retval = -EINVAL;
-            //     break;
-            // }
-
-            retval = copy_from_user(&seek_cmd, (struct aesd_seekto __user *)arg,
-                sizeof(struct aesd_seekto));
-
-            if (retval) {
+            // Fetch seek command from user space
+            if (copy_from_user(&seek_cmd, (const void __user *)arg, sizeof(seek_cmd)) != 0) {
+                retval = -EINVAL;
                 break;
             }
 
