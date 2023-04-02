@@ -361,9 +361,12 @@ void* client_thread_func (void *thread_args)
                         client_errors++;
                     }
 
+                    int data_fd = fileno(data_file);
+
                     if ((!client_errors) && (num_tokens == 2)) {
-                        if(ioctl(fileno(data_file), AESDCHAR_IOCSEEKTO, &ioctl_arg)) {
-                            syslog(LOG_ERR, "ioctl AESDCHAR_IOCSEEKTO failed.\n");
+                        if(ioctl(data_fd, AESDCHAR_IOCSEEKTO, &ioctl_arg)) {
+                            syslog(LOG_ERR, "ioctl AESDCHAR_IOCSEEKTO failed: %s\n", 
+                                strerror(errno));
                             client_errors++;
                         }
                     }

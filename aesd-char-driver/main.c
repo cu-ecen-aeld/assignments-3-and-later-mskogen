@@ -254,6 +254,7 @@ loff_t aesd_llseek(struct file *filp, loff_t off, int whence)
 
 long aesd_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 {
+    PDEBUG("ioctl");
     struct aesd_dev *dev = filp->private_data;
     struct aesd_seekto seek_cmd;
     struct aesd_buffer_entry *entry;
@@ -266,6 +267,7 @@ long aesd_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 
             // Fetch seek command from user space
             if (copy_from_user(&seek_cmd, (const void __user *)arg, sizeof(seek_cmd)) != 0) {
+                PDEBUG("Failed to get seek command from userspace\n");
                 retval = -EINVAL;
                 break;
             }
@@ -276,6 +278,7 @@ long aesd_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
             if ((seek_cmd.write_cmd < 0) ||
                (seek_cmd.write_cmd > AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED))
             {
+                PDEBUG("write_cmd value invalid: %u\n", seek_cmd.write_cmd);
                 retval = -EINVAL;
                 break;
             }
@@ -286,6 +289,7 @@ long aesd_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
                     loc_off += entry->size;
                 } else {
                     // buffer isn't large enough for specified write_cmd
+                    PDEBUG("write_cmd '%u' doesn't exist in current list\n", seek_cmd.write_cmd);
                     retval = -EINVAL;
                     break;
                 }
@@ -295,12 +299,14 @@ long aesd_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
             if ((entry->buffptr != NULL) && (entry->size > 0)) {
                 if (seek_cmd.write_cmd_offset > entry->size) {
                     // write_cmd is not big enough
+                    PDEBUG("write_cmd_offset %u doesn't fit for entry size %lu\n", seek_cmd.write_cmd_offset, entry->size);
                     retval = -EINVAL;
                     break;                
                 }
                 loc_off += seek_cmd.write_cmd_offset;
             } else {
                 // buffer isn't large enough for specified write_cmd
+                PDEBUG("Entry is wrong\n");
                 retval = -EINVAL;
                 break;
             }
@@ -311,6 +317,7 @@ long aesd_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
             break;
         default:
             // Invalid/Unknown ioctl
+            PDEBUG("unknown ioctl value: %u\n", cmd);
             retval = -EINVAL;
     }
 
