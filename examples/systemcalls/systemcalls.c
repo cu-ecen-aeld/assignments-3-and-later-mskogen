@@ -1,3 +1,9 @@
+#include <stdlib.h>
+#include <unistd.h>
+#include <sys/wait.h>
+#include <sys/types.h>
+#include <fcntl.h>
+
 #include "systemcalls.h"
 
 /**
@@ -9,15 +15,26 @@
 */
 bool do_system(const char *cmd)
 {
+    int wait_val = 0;
+    wait_val = system(cmd);
 
-/*
- * TODO  add your code here
- *  Call the system() function with the command set in the cmd
- *   and return a boolean true if the system() call completed with success
- *   or false() if it returned a failure
-*/
+    /* Return an error if the system call failed. */
+    if (wait_val == -1) {
+        perror("system() failed: ");
+        return false;
+    }
 
-    return true;
+    /* 
+     * If we made it here the return val is a valid wait status. Check it to 
+     * make sure that the command exited properly and did not return a non-zero 
+     * value.
+     */
+    if (WIFEXITED(wait_val)) {
+        return (WEXITSTATUS(wait_val) == EXIT_SUCCESS);
+    }
+
+    /* If process didn't exit properly, return false */
+    return false;
 }
 
 /**
@@ -44,24 +61,52 @@ bool do_exec(int count, ...)
     {
         command[i] = va_arg(args, char *);
     }
-    command[count] = NULL;
-    // this line is to avoid a compile warning before your implementation is complete
-    // and may be removed
-    command[count] = command[count];
-
-/*
- * TODO:
- *   Execute a system command by calling fork, execv(),
- *   and wait instead of system (see LSP page 161).
- *   Use the command[0] as the full path to the command to execute
- *   (first argument to execv), and use the remaining arguments
- *   as second argument to the execv() command.
- *
-*/
-
     va_end(args);
+    command[count] = NULL;
 
-    return true;
+    /* If there is no command then there is nothing to do */
+    if (command[0] == NULL) {
+        return false;
+    }
+
+    int wait_val = 0;
+    int ret_val = 0;
+    pid_t pid;
+
+    /* Create a child process */
+    pid = fork();
+
+    if (pid == -1) {
+        /* Failed to create child process */
+        perror("fork() failed: ");
+        return false;
+    } else if (pid == 0) {
+        /* Inside child process */
+        ret_val = execv(command[0], command);
+        
+        /* If process failed to execute return false for error */
+        if (ret_val == -1) {
+            perror("execv() failed: ");
+        }
+        exit(EXIT_FAILURE);
+    }
+
+    /* Parent does cleanup of process, waits for child process to exit */
+    if (wait(&wait_val) == -1) {
+        perror("wait() failed: ");
+        return false;
+    }
+
+    /* 
+     * If we made it here the return val is a valid wait status. Check it to 
+     * make sure that the command exited properly and did not return a non-zero 
+     * value.
+     */
+    if (WIFEXITED(wait_val)) {
+        return (WEXITSTATUS(wait_val) == EXIT_SUCCESS);
+    }
+
+    return false;
 }
 
 /**
@@ -80,20 +125,72 @@ bool do_exec_redirect(const char *outputfile, int count, ...)
         command[i] = va_arg(args, char *);
     }
     command[count] = NULL;
-    // this line is to avoid a compile warning before your implementation is complete
-    // and may be removed
-    command[count] = command[count];
-
-
-/*
- * TODO
- *   Call execv, but first using https://stackoverflow.com/a/13784315/1446624 as a refernce,
- *   redirect standard out to a file specified by outputfile.
- *   The rest of the behaviour is same as do_exec()
- *
-*/
-
     va_end(args);
 
-    return true;
+    /* If there is no command then there is nothing to do */
+    if (command[0] == NULL) {
+        return false;
+    }
+
+    int wait_val = 0;
+    int ret_val = 0;
+    int errors = 0;
+    int fd = -1;
+    pid_t pid;
+
+    /* Creates log file with 0644 permissions. */
+    fd = open(outputfile, (O_WRONLY | O_TRUNC | O_CREAT), \
+        (S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH));    
+
+    /* Output errors to stdout if log file creation failed */
+    if (fd < 0) {
+        perror("open() failed: ");
+    }
+
+    /* Create a child process */
+    pid = fork();
+
+    switch (pid) {
+        case -1:
+            /* Failed to create child process */
+            perror("fork() failed: ");
+            errors++;
+            break;
+        case 0:
+            /* Inside child process */
+            /* Redirect any output to same logfile as parent process */
+            if (dup2(fd, 1) < 0) {
+                perror("dup2() failed: ");
+                exit(EXIT_FAILURE);
+            }
+            close(fd);
+            ret_val = execv(command[0], command);
+            
+            /* If process failed to execute return false for error */
+            if (ret_val == -1) {
+                perror("execv() failed: ");
+                exit(EXIT_FAILURE);
+            }
+            break;
+        default:
+            /* Parent does cleanup of process, waits for child process to exit */
+            if (wait(&wait_val) == -1) {
+                perror("wait() failed: ");
+                errors++;
+            }
+    }
+
+    /* Done with log now, close file */
+    close(fd);
+
+    /* 
+    * If we made it here the return val is a valid wait status. Check it to 
+    * make sure that the command exited properly and did not return a non-zero 
+    * value.
+    */
+    if (WIFEXITED(wait_val) && (errors == 0)) {
+        return (WEXITSTATUS(wait_val) == EXIT_SUCCESS);
+    }
+
+    return false;
 }
