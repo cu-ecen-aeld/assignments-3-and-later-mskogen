@@ -216,7 +216,13 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
 loff_t aesd_llseek(struct file *filp, loff_t off, int whence)
 {
     struct aesd_dev *dev = filp->private_data;
-    loff_t newpos;
+    loff_t newpos, errors = 0;
+
+    // lock device to prevent write from altering filp or writing before llseek
+    // finishes.
+    if (mutex_lock_interruptible(&dev->mx_lock)) {
+        return -ERESTARTSYS;
+    }
 
     // Determine new position offset value to update file pointer too
     switch(whence) {
@@ -234,21 +240,30 @@ loff_t aesd_llseek(struct file *filp, loff_t off, int whence)
             break;
         default:
             // Invalid, shouldn't ever hit this
-            return -EINVAL;
+            errors++;
+            newpos = -EINVAL;
     }
 
     // Check validity of new position, can't be negative or larger than the size
     // of the buffer
     if (newpos < 0) {
-        return -EINVAL;
+        errors++;
+        newpos = -EINVAL;
     }
 
     if (newpos > dev->buf_size) {
-        return -EINVAL;
+        errors++;
+        newpos = -EINVAL;
     }
 
-    // Set new file position
-    filp->f_pos = newpos;
+    // Set new file position if there aren't any errors
+    if (errors == 0) {
+        filp->f_pos = newpos;
+    }
+
+    // Unlock mutex now that writes to the device should be valid
+    mutex_unlock(&dev->mx_lock);
+
     return newpos;
 }
 
@@ -260,6 +275,7 @@ long aesd_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
     loff_t loc_off = 0;
     uint32_t index;
     long retval = 0;
+    bool mx_locked = false;
 
     PDEBUG("aesd_ioctl call with cmd '%u'\n", cmd);
 
@@ -282,6 +298,15 @@ long aesd_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
                 PDEBUG("write_cmd value invalid: %u\n", seek_cmd.write_cmd);
                 retval = -EINVAL;
                 break;
+            }
+
+            // lock device to prevent write from altering filp or writing to
+            // the circular buffer before seekto ioctl completes
+            if (mutex_lock_interruptible(&dev->mx_lock)) {
+                retval = -ERESTARTSYS;
+                break;
+            } else {
+                mx_locked = true;
             }
 
             for (index = 0; index < seek_cmd.write_cmd; index++) {
@@ -320,6 +345,10 @@ long aesd_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
             // Invalid/Unknown ioctl
             PDEBUG("unknown ioctl value: %u\n", cmd);
             retval = -EINVAL;
+    }
+
+    if (mx_locked) {
+        mutex_unlock(&dev->mx_lock);
     }
 
     return retval;
