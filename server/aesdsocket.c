@@ -176,6 +176,7 @@ void cleanup(bool terminate)
 
     // If we are exiting after this call, close all open file descriptors
     if (terminate) {
+
 #if USE_AESD_CHAR_DEVICE == 0
         if (timer_active) {
             status = timer_delete(timer);
@@ -194,6 +195,7 @@ void cleanup(bool terminate)
             mutex_active = false;
         }
 
+#if USE_AESD_CHAR_DEVICE == 0
         if (tmp_file_exists) {
             status = remove(TMP_FILE);
             if (status != 0) {
@@ -201,6 +203,7 @@ void cleanup(bool terminate)
             }
             tmp_file_exists = false;
         }
+#endif
 
         if (syslog_open) {
             closelog();

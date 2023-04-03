@@ -13,4 +13,4 @@ all:
 	$(CC) $(CFLAGS) $(EXTRA_CFLAGS) $(INCLUDES) ${SOURCES} -o $(TARGET) $(LDFLAGS)
 
 clean:
-	rm -f $(PROGRAM_NAME) *.o
+	rm -f $(TARGET) *.o
