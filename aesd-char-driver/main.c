@@ -254,13 +254,14 @@ loff_t aesd_llseek(struct file *filp, loff_t off, int whence)
 
 long aesd_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 {
-    PDEBUG("ioctl");
     struct aesd_dev *dev = filp->private_data;
     struct aesd_seekto seek_cmd;
     struct aesd_buffer_entry *entry;
     loff_t loc_off = 0;
     uint32_t index;
     long retval = 0;
+
+    PDEBUG("aesd_ioctl call with cmd '%u'\n", cmd);
 
     switch (cmd) {
         case AESDCHAR_IOCSEEKTO:
@@ -331,7 +332,7 @@ struct file_operations aesd_fops = {
     .open =     aesd_open,
     .release =  aesd_release,
     .llseek =   aesd_llseek,
-    .compat_ioctl = aesd_ioctl,
+    .unlocked_ioctl = aesd_ioctl,
 };
 
 static int aesd_setup_cdev(struct aesd_dev *dev)

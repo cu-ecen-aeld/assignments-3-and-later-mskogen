@@ -136,7 +136,7 @@ void timer_thread_handler(union sigval sv)
     ts_len = strftime(ts_str, sizeof(ts_str), ts_format, ts);
 
     // Open file to log timestamp to
-    FILE* data_file = fopen(TMP_FILE, "a");
+    FILE* data_file = fopen(TMP_FILE, "a+");
     if (data_file == NULL) {
         syslog(LOG_ERR, "fopen(): %s\n", strerror(errno));
         return;
