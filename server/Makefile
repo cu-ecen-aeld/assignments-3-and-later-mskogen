@@ -6,11 +6,11 @@ LDFLAGS ?= -lpthread -lrt
 # Project specific flags
 TARGET ?= aesdsocket
 SOURCES = aesdsocket.c
-INCLUDES = -I.
+INCLUDES = -I. -I../aesd-char-driver
 EXTRA_CFLAGS = -DUSE_AESD_CHAR_DEVICE=1
 
 all:
 	$(CC) $(CFLAGS) $(EXTRA_CFLAGS) $(INCLUDES) ${SOURCES} -o $(TARGET) $(LDFLAGS)
 
 clean:
-	rm -f $(PROGRAM_NAME) *.o
+	rm -f $(TARGET) *.o

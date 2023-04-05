@@ -38,6 +38,8 @@
 #include <sys/queue.h>
 #include <time.h>
 
+#include "aesd_ioctl.h"
+
 // FreeBSD Macro for safe slist looping
 // Copied from: https://github.com/stockrt/queue.h/blob/master/queue.h
 #define SLIST_FOREACH_SAFE(var, head, field, tvar)                           \
@@ -57,6 +59,7 @@
 #endif
 #define READ_SIZE           (1024)
 #define WRITE_SIZE          (1024)
+#define AESD_IOCTL_PREFIX_LEN (19)
 
 bool exit_status = false;
 int socket_fd = 0;
@@ -133,7 +136,7 @@ void timer_thread_handler(union sigval sv)
     ts_len = strftime(ts_str, sizeof(ts_str), ts_format, ts);
 
     // Open file to log timestamp to
-    FILE* data_file = fopen(TMP_FILE, "a");
+    FILE* data_file = fopen(TMP_FILE, "a+");
     if (data_file == NULL) {
         syslog(LOG_ERR, "fopen(): %s\n", strerror(errno));
         return;
@@ -173,6 +176,7 @@ void cleanup(bool terminate)
 
     // If we are exiting after this call, close all open file descriptors
     if (terminate) {
+
 #if USE_AESD_CHAR_DEVICE == 0
         if (timer_active) {
             status = timer_delete(timer);
@@ -191,6 +195,7 @@ void cleanup(bool terminate)
             mutex_active = false;
         }
 
+#if USE_AESD_CHAR_DEVICE == 0
         if (tmp_file_exists) {
             status = remove(TMP_FILE);
             if (status != 0) {
@@ -198,6 +203,7 @@ void cleanup(bool terminate)
             }
             tmp_file_exists = false;
         }
+#endif
 
         if (syslog_open) {
             closelog();
@@ -312,7 +318,9 @@ void* client_thread_func (void *thread_args)
         // https://man7.org/linux/man-pages/man3/strchr.3.html
         if (total_bytes < rx_size) {
             while (1) {
-                int status = 0;
+                int status = 0, num_tokens = 0;
+                struct aesd_seekto ioctl_arg;
+                memset(&ioctl_arg, 0, sizeof(ioctl_arg));
 
                 // Check for newline
                 p_end = strchr(rx_buffer, '\n');
@@ -330,11 +338,55 @@ void* client_thread_func (void *thread_args)
                     client_errors++;
                     break;
                 }
-                while (p <= p_end) {
-                    fprintf(data_file, "%c", *p);
-                    p++;
-                    total_bytes--;
+
+                // Special handling for AESDCHAR_IOCSEEKTO:X,Y commands
+                if (strncmp(p, "AESDCHAR_IOCSEEKTO:", AESD_IOCTL_PREFIX_LEN) == 0) {
+                    syslog(LOG_INFO, "Received AESDCHAR_IOCSEEKTO command.\n");
+                    p += AESD_IOCTL_PREFIX_LEN;
+                    char *token = strtok(p, ",");
+
+                    if (token != NULL) {
+                        ioctl_arg.write_cmd = (uint32_t)strtoul(token, NULL, 10);
+                        num_tokens++;
+
+                        // Get next token
+                        token = strtok(NULL, ",");
+
+                        if (token != NULL) {
+                            ioctl_arg.write_cmd_offset = (uint32_t)strtoul(token, NULL, 10);
+                            num_tokens++;
+                        } else {
+                            syslog(LOG_ERR, "write_cmd_offset missing.\n");
+                            client_errors++;
+                        }
+                    } else {
+                        syslog(LOG_ERR, "write_cmd missing.\n");
+                        client_errors++;
+                    }
+
+                    int data_fd = fileno(data_file);
+
+                    if ((!client_errors) && (num_tokens == 2)) {
+                        if(ioctl(data_fd, AESDCHAR_IOCSEEKTO, &ioctl_arg)) {
+                            syslog(LOG_ERR, "ioctl AESDCHAR_IOCSEEKTO failed: %s\n", 
+                                strerror(errno));
+                            client_errors++;
+                        }
+                    }
+
+                } else {
+                    // Normal write received command to file
+                    while (p <= p_end) {
+                        fprintf(data_file, "%c", *p);
+                        p++;
+                        total_bytes--;
+                    }
+
+                    // Reset file pointer to read from beginning of file for
+                    // sending file back
+                    rewind(data_file);
                 }
+
                 status = pthread_mutex_unlock(client_info->mutex);
                 if (status) {
                     syslog(LOG_ERR, "pthread_mutex_unlock(): %s\n", strerror(status));
@@ -346,14 +398,11 @@ void* client_thread_func (void *thread_args)
                 memset(rx_buffer, 0, packet_len);
                 memcpy(rx_buffer, p, total_bytes);
 
-                // Send packet back on client
+                // Send contents of file back to client
                 char line[WRITE_SIZE];
                 memset(line, 0, WRITE_SIZE);
                 int tx_bytes = 0;
                 int tx_bytes_to_send = 0;
-
-                // Reset file pointer to read from beginning of file
-                rewind(data_file);
 
                 while (fgets(line, WRITE_SIZE, data_file) != NULL) {
                     tx_bytes_to_send = strlen(line);
